@@ -19,7 +19,7 @@ jobs:
         components: rustfmt, clippy
         
     - name: Cache cargo registry
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
@@ -112,14 +112,14 @@ jobs:
         echo "Updated Anchor.toml with Program ID: $PROGRAM_ID"
         
     - name: Upload Program ID as artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: program-id
         path: Backend/program_id.txt
         retention-days: 30
         
     - name: Upload updated Anchor.toml as artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: anchor-config
         path: Backend/Anchor.toml
