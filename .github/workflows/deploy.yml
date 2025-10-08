@@ -3,7 +3,7 @@ name: Deploy Solana Program to Devnet
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -12,23 +12,23 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
-        
+
     - name: Install Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        
+
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y pkg-config build-essential libssl-dev libudev-dev
-        
-    - name: Cache cargo registry
+        sudo apt-get install -y pkg-config build-essential libssl-dev libudev-dev ca-certificates curl jq
+
+    - name: Cache Cargo
       uses: actions/cache@v4
       with:
         path: |
@@ -37,115 +37,87 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
-          
-    - name: Install Solana CLI
+
+    - name: Install latest Solana CLI
       run: |
-        echo "Installing Solana CLI..."
-        sh -c "$(curl -sSfL https://release.solana.com/v1.18.11/install)"
-        
+        echo "Fetching latest Solana release..."
+        LATEST_TAG=$(curl -s https://api.github.com/repos/solana-labs/solana/releases/latest | jq -r .tag_name)
+        echo "Installing Solana $LATEST_TAG..."
+        sh -c "$(curl -sSfL https://release.solana.com/${LATEST_TAG}/install)"
         echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
         export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-        
-        echo "=== Verifying Solana CLI Installation ==="
+        echo "Solana version:"
         solana --version
-        
+
     - name: Install Anchor CLI
       run: |
         echo "Installing Anchor CLI..."
         cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked --force
-        
-    - name: Verify all installations
-      run: |
-        echo "=== Final verification ==="
-        rustc --version
-        solana --version
         anchor --version
-        
+
     - name: Configure Solana CLI for Devnet
       run: |
         solana config set --url https://api.devnet.solana.com
         solana config set --commitment confirmed
-        
+
     - name: Create wallet from secret
       run: |
         mkdir -p ~/.config/solana
         echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > ~/.config/solana/id.json
         chmod 600 ~/.config/solana/id.json
-        
-    - name: Get wallet address
+
+    - name: Show wallet address
       run: |
-        WALLET_ADDRESS=$(solana address)
-        echo "Wallet Address: $WALLET_ADDRESS"
-        echo "WALLET_ADDRESS=$WALLET_ADDRESS" >> $GITHUB_ENV
-        
-    - name: Request airdrop (if needed)
+        WALLET=$(solana address)
+        echo "Wallet: $WALLET"
+        echo "WALLET_ADDRESS=$WALLET" >> $GITHUB_ENV
+
+    - name: Request airdrop (if balance < 1 SOL)
       run: |
-        BALANCE=$(solana balance)
-        echo "Current balance: $BALANCE SOL"
+        BALANCE=$(solana balance | awk '{print $1}')
+        echo "Current balance: $BALANCE"
         if (( $(echo "$BALANCE < 1.0" | bc -l) )); then
           echo "Requesting airdrop..."
           solana airdrop 2
-        else
-          echo "Sufficient balance, no airdrop needed"
         fi
-        
+
     - name: Build program
       run: |
         cd Backend
-        echo "Building program with Anchor..."
         anchor build
-        
+
     - name: Deploy program
       run: |
         cd Backend
-        echo "Deploying program..."
         anchor deploy
-        
+
     - name: Extract Program ID
       run: |
         cd Backend
-        PROGRAM_ID=$(solana address -k target/deploy/lets_cook-keypair.json)
+        PROGRAM_ID=$(solana address -k target/deploy/*.json)
         echo "Program ID: $PROGRAM_ID"
         echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
         echo "$PROGRAM_ID" > program_id.txt
-        
-    - name: Display Program ID
-      run: |
-        echo "=========================================="
-        echo "🎉 DEPLOYMENT SUCCESSFUL! 🎉"
-        echo "=========================================="
-        echo "Program ID: ${{ env.PROGRAM_ID }}"
-        echo "Wallet Address: ${{ env.WALLET_ADDRESS }}"
-        echo "Network: Devnet"
-        echo "=========================================="
-        
+
     - name: Update Anchor.toml with Program ID
       run: |
         cd Backend
-        PROGRAM_ID="${{ env.PROGRAM_ID }}"
-        
-        # Create backup
         cp Anchor.toml Anchor.toml.backup
-        
-        # Update Anchor.toml with new program ID
-        sed -i "s/lets_cook = \".*\"/lets_cook = \"$PROGRAM_ID\"/" Anchor.toml
-        
-        echo "Updated Anchor.toml with Program ID: $PROGRAM_ID"
-        
-    - name: Upload Program ID as artifact
+        sed -i "s/\"[A-Za-z0-9]\{32,44\}\"/\"${{ env.PROGRAM_ID }}\"/" Anchor.toml
+        echo "Updated Anchor.toml with new Program ID."
+
+    - name: Upload Program ID
       uses: actions/upload-artifact@v4
       with:
         name: program-id
         path: Backend/program_id.txt
-        retention-days: 30
-        
-    - name: Upload updated Anchor.toml as artifact
+
+    - name: Upload updated Anchor.toml
       uses: actions/upload-artifact@v4
       with:
         name: anchor-config
         path: Backend/Anchor.toml
-        retention-days: 30
-        
+
     - name: Commit updated Anchor.toml
       run: |
         cd Backend
@@ -158,3 +130,13 @@ jobs:
           git commit -m "Update Program ID to ${{ env.PROGRAM_ID }} [skip ci]"
           git push
         fi
+
+    - name: Display Summary
+      run: |
+        echo "=========================================="
+        echo "🎉 DEPLOYMENT SUCCESSFUL 🎉"
+        echo "=========================================="
+        echo "Program ID: ${{ env.PROGRAM_ID }}"
+        echo "Wallet Address: ${{ env.WALLET_ADDRESS }}"
+        echo "Network: Devnet"
+        echo "=========================================="
