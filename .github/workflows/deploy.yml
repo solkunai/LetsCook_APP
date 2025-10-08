@@ -42,6 +42,7 @@ jobs:
       run: |
         sh -c "$(curl -sSfL https://release.solana.com/v1.18.11/install)"
         echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+        echo "Solana CLI installed to: $HOME/.local/share/solana/install/active_release/bin"
         
     - name: Install Anchor CLI
       run: |
@@ -50,33 +51,38 @@ jobs:
         
     - name: Verify installations
       run: |
+        echo "=== Verifying installations ==="
         rustc --version
-        solana --version
+        echo "PATH: $PATH"
+        echo "Checking Solana CLI..."
+        ls -la $HOME/.local/share/solana/install/active_release/bin/
+        $HOME/.local/share/solana/install/active_release/bin/solana --version
         anchor --version
         
     - name: Configure Solana CLI for Devnet
       run: |
-        solana config set --url https://api.devnet.solana.com
-        solana config set --commitment confirmed
+        $HOME/.local/share/solana/install/active_release/bin/solana config set --url https://api.devnet.solana.com
+        $HOME/.local/share/solana/install/active_release/bin/solana config set --commitment confirmed
         
     - name: Create wallet from secret
       run: |
-        echo "${{ secrets.SOLANA_WALLET_KEY }}" > ~/.config/solana/id.json
+        mkdir -p ~/.config/solana
+        echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > ~/.config/solana/id.json
         chmod 600 ~/.config/solana/id.json
         
     - name: Get wallet address
       run: |
-        WALLET_ADDRESS=$(solana address)
+        WALLET_ADDRESS=$($HOME/.local/share/solana/install/active_release/bin/solana address)
         echo "Wallet Address: $WALLET_ADDRESS"
         echo "WALLET_ADDRESS=$WALLET_ADDRESS" >> $GITHUB_ENV
         
     - name: Request airdrop (if needed)
       run: |
-        BALANCE=$(solana balance)
+        BALANCE=$($HOME/.local/share/solana/install/active_release/bin/solana balance)
         echo "Current balance: $BALANCE SOL"
         if (( $(echo "$BALANCE < 1.0" | bc -l) )); then
           echo "Requesting airdrop..."
-          solana airdrop 2
+          $HOME/.local/share/solana/install/active_release/bin/solana airdrop 2
         else
           echo "Sufficient balance, no airdrop needed"
         fi
@@ -96,7 +102,7 @@ jobs:
     - name: Extract Program ID
       run: |
         cd Backend
-        PROGRAM_ID=$(solana address -k target/deploy/lets_cook-keypair.json)
+        PROGRAM_ID=$($HOME/.local/share/solana/install/active_release/bin/solana address -k target/deploy/lets_cook-keypair.json)
         echo "Program ID: $PROGRAM_ID"
         echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
         echo "$PROGRAM_ID" > program_id.txt
