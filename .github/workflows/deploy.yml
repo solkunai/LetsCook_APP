@@ -28,17 +28,24 @@ jobs:
     - name: Verify and fix installations
       run: |
         echo "=== Verifying installations ==="
-        echo "PATH: $PATH"
+        echo "Current PATH: $PATH"
         
         # Check if solana is available
         if ! command -v solana &> /dev/null; then
           echo "❌ Solana CLI not found, installing manually..."
-          
-          # Install Solana CLI manually as fallback
-          sh -c "$(curl -sSfL https://release.solana.com/v1.18.11/install)"
+          SOLANA_VERSION=${{ steps.versions.outputs.solana_version }}
+          if [ -z "$SOLANA_VERSION" ]; then
+            SOLANA_VERSION="1.18.20"
+            echo "No solana_version found in Cargo.lock, using fallback: $SOLANA_VERSION"
+          fi
+          sh -c "$(curl -sSfL https://release.solana.com/$SOLANA_VERSION/install)" || { echo "Failed to install Solana CLI"; exit 1; }
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
           export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          
+          echo "Updated PATH: $PATH"
+          if ! command -v solana &> /dev/null; then
+            echo "❌ Solana CLI still not found after installation"
+            exit 1
+          fi
           echo "✅ Solana CLI installed manually"
         else
           echo "✅ Solana CLI found"
@@ -47,10 +54,12 @@ jobs:
         # Check if anchor is available
         if ! command -v anchor &> /dev/null; then
           echo "❌ Anchor CLI not found, installing manually..."
-          
-          # Install Anchor CLI manually as fallback
-          cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked --force
-          
+          ANCHOR_VERSION=${{ steps.versions.outputs.anchor_version }}
+          if [ -z "$ANCHOR_VERSION" ]; then
+            ANCHOR_VERSION="0.31.1"
+            echo "No anchor_version found in Cargo.lock, using fallback: $ANCHOR_VERSION"
+          fi
+          cargo install --git https://github.com/coral-xyz/anchor anchor-cli --version $ANCHOR_VERSION --force || { echo "Failed to install Anchor CLI"; exit 1; }
           echo "✅ Anchor CLI installed manually"
         else
           echo "✅ Anchor CLI found"
@@ -58,12 +67,12 @@ jobs:
         
         # Final verification
         echo "Final verification:"
-        solana --version
-        anchor --version
+        solana --version || { echo "Solana CLI verification failed"; exit 1; }
+        anchor --version || { echo "Anchor CLI verification failed"; exit 1; }
 
     - name: Configure Solana CLI for Devnet
       run: |
-        solana config set --url https://api.devnet.solana.com
+        solana config set --url https://tyo74.nodes.rpcpool.com
         solana config set --commitment confirmed
 
     - name: Create wallet from secret
@@ -84,8 +93,18 @@ jobs:
         echo "Current balance: $BALANCE"
         if (( $(echo "$BALANCE < 1.0" | bc -l) )); then
           echo "Requesting airdrop..."
-          solana airdrop 2
+          for i in {1..3}; do
+            solana airdrop 2 && break
+            echo "Airdrop attempt $i failed, retrying..."
+            sleep 5
+          done
+          solana balance
         fi
+
+    - name: Install dependencies
+      run: |
+        cd Backend
+        cargo build --release
 
     - name: Build program
       run: |
@@ -95,12 +114,16 @@ jobs:
     - name: Deploy program
       run: |
         cd Backend
-        anchor deploy
+        for i in {1..3}; do
+          anchor deploy && break
+          echo "Deploy attempt $i failed, retrying..."
+          sleep 5
+        done
 
     - name: Extract Program ID
       run: |
         cd Backend
-        PROGRAM_ID=$(solana address -k target/deploy/*.json)
+        PROGRAM_ID=$(solana address -k target/deploy/counter.json)
         echo "Program ID: $PROGRAM_ID"
         echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
         echo "$PROGRAM_ID" > program_id.txt
@@ -109,8 +132,9 @@ jobs:
       run: |
         cd Backend
         cp Anchor.toml Anchor.toml.backup
-        sed -i "s/\"[A-Za-z0-9]\{32,44\}\"/\"${{ env.PROGRAM_ID }}\"/" Anchor.toml
+        sed -i "/\[programs.devnet\]/,/^\[/ s/counter = \".*\"/counter = \"${{ env.PROGRAM_ID }}\"/" Anchor.toml
         echo "Updated Anchor.toml with new Program ID."
+        cat Anchor.toml
 
     - name: Upload Program ID
       uses: actions/upload-artifact@v4
