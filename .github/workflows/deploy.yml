@@ -25,6 +25,42 @@ jobs:
         anchor_version: ${{ steps.versions.outputs.anchor_version }}
         node_version: 20
 
+    - name: Verify and fix installations
+      run: |
+        echo "=== Verifying installations ==="
+        echo "PATH: $PATH"
+        
+        # Check if solana is available
+        if ! command -v solana &> /dev/null; then
+          echo "❌ Solana CLI not found, installing manually..."
+          
+          # Install Solana CLI manually as fallback
+          sh -c "$(curl -sSfL https://release.solana.com/v1.18.11/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          
+          echo "✅ Solana CLI installed manually"
+        else
+          echo "✅ Solana CLI found"
+        fi
+        
+        # Check if anchor is available
+        if ! command -v anchor &> /dev/null; then
+          echo "❌ Anchor CLI not found, installing manually..."
+          
+          # Install Anchor CLI manually as fallback
+          cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked --force
+          
+          echo "✅ Anchor CLI installed manually"
+        else
+          echo "✅ Anchor CLI found"
+        fi
+        
+        # Final verification
+        echo "Final verification:"
+        solana --version
+        anchor --version
+
     - name: Configure Solana CLI for Devnet
       run: |
         solana config set --url https://api.devnet.solana.com
