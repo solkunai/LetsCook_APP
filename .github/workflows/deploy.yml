@@ -9,21 +9,54 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
     # ==============================
-    # Install dependencies for Rust & Node
+    # Cache Rust & Cargo dependencies
     # ==============================
-    - name: Setup Rust, Node.js, and dependencies
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    # ==============================
+    # Cache Solana & Anchor binaries
+    # ==============================
+    - name: Cache Solana & Anchor
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/bin
+          ~/.config/solana
+        key: ${{ runner.os }}-solana-anchor-${{ hashFiles('**/Anchor.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-solana-anchor-
+
+    # ==============================
+    # Install base dependencies
+    # ==============================
+    - name: Setup Node.js and Rust
       uses: actions/setup-node@v4
       with:
         node-version: 20
-      continue-on-error: false
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libudev-dev libssl-dev build-essential curl jq
+
     - name: Verify base tools
       run: |
         rustc --version
@@ -32,16 +65,20 @@ jobs:
         npm --version
 
     # ==============================
-    # Install Solana CLI (GitHub mirror to avoid SSL issues)
+    # Install Solana CLI (GitHub mirror)
     # ==============================
     - name: Install Solana CLI
       run: |
-        echo "=== Installing Solana CLI via GitHub mirror ==="
-        SOLANA_VERSION="v1.18.20"
-        mkdir -p ~/.local/bin
-        curl -L "https://github.com/solana-labs/solana/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" -o solana.tar.bz2
-        tar -xjf solana.tar.bz2
-        mv solana-release/bin/* ~/.local/bin/
+        if ! command -v solana &> /dev/null; then
+          echo "=== Installing Solana CLI via GitHub mirror ==="
+          SOLANA_VERSION="v1.18.20"
+          mkdir -p ~/.local/bin
+          curl -L "https://github.com/solana-labs/solana/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" -o solana.tar.bz2
+          tar -xjf solana.tar.bz2
+          mv solana-release/bin/* ~/.local/bin/
+        else
+          echo "✅ Solana already cached"
+        fi
         echo "$HOME/.local/bin" >> $GITHUB_PATH
         export PATH="$HOME/.local/bin:$PATH"
         solana --version
@@ -51,10 +88,15 @@ jobs:
     # ==============================
     - name: Install Anchor CLI
       run: |
-        echo "=== Installing Anchor CLI ==="
-        ANCHOR_VERSION="0.31.1"
-        rustup default stable
-        cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --force
+        if ! command -v anchor &> /dev/null; then
+          echo "=== Installing Anchor CLI ==="
+          ANCHOR_VERSION="0.31.1"
+          source $HOME/.cargo/env
+          rustup default stable
+          cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --force
+        else
+          echo "✅ Anchor already cached"
+        fi
         anchor --version
 
     # ==============================
@@ -66,7 +108,7 @@ jobs:
         solana config set --commitment confirmed
 
     # ==============================
-    # Setup wallet from secret
+    # Setup wallet from GitHub secret
     # ==============================
     - name: Create wallet from GitHub secret
       run: |
