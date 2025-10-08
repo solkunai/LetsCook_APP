@@ -18,6 +18,16 @@ jobs:
       with:
         components: rustfmt, clippy
         
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config build-essential libssl-dev libudev-dev
+        
     - name: Cache cargo registry
       uses: actions/cache@v4
       with:
@@ -35,6 +45,7 @@ jobs:
         
     - name: Install Anchor CLI
       run: |
+        echo "Installing Anchor CLI..."
         cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked --force
         
     - name: Verify installations
@@ -73,11 +84,13 @@ jobs:
     - name: Build program
       run: |
         cd Backend
+        echo "Building program with Anchor..."
         anchor build
         
     - name: Deploy program
       run: |
         cd Backend
+        echo "Deploying program..."
         anchor deploy
         
     - name: Extract Program ID

@@ -10,7 +10,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { getHeliusAPI } from './helius';
 
 // Program ID from our deployed program
-const PROGRAM_ID = new PublicKey("Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU");
+const PROGRAM_ID = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU");
 
 // Simple instruction discriminator for our basic program
 const CREATE_LAUNCH_DISCRIMINATOR = Buffer.from([0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f, 0x7a, 0x8b]);
