@@ -9,102 +9,79 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    
+
     steps:
-    # -------------------------------
-    # ✅ Checkout code
-    # -------------------------------
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # -------------------------------
-    # ✅ Extract Solana & Anchor versions
-    # -------------------------------
     - name: Extract versions from Cargo.lock
       uses: solana-developers/github-actions/extract-versions@v0.2.7
       id: versions
 
-    # -------------------------------
-    # ✅ Install Rust toolchain
-    # -------------------------------
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        components: rustfmt, clippy
-        override: true
-
-    # -------------------------------
-    # ✅ Install Solana CLI (Official)
-    # -------------------------------
-    - name: Install Solana CLI
+    # ==============================
+    # Install Solana CLI (via GitHub mirror)
+    # ==============================
+    - name: Install Solana CLI (from GitHub mirror)
       run: |
-        echo "=== Installing Solana CLI ==="
-        sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
-        export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+        echo "=== Installing Solana CLI via GitHub mirror ==="
+        SOLANA_VERSION="v1.18.20"
+        mkdir -p ~/.local/bin
+        curl -L "https://github.com/solana-labs/solana/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" -o solana.tar.bz2
+        tar -xjf solana.tar.bz2
+        mv solana-release/bin/* ~/.local/bin/
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
         solana --version
 
-    # -------------------------------
-    # ✅ Setup Anchor and Node.js
-    # -------------------------------
+    # ==============================
+    # Install Anchor and Node.js
+    # ==============================
     - name: Setup Anchor and Node.js
       uses: solana-developers/github-actions/setup-all@v0.2.7
       with:
         anchor_version: ${{ steps.versions.outputs.anchor_version }}
         node_version: 20
 
-    # -------------------------------
-    # ✅ Verify installations
-    # -------------------------------
-    - name: Verify installations
+    # ==============================
+    # Verify installations
+    # ==============================
+    - name: Verify Solana and Anchor
       run: |
-        echo "=== Verifying installations ==="
-        rustc --version
-        cargo --version
+        echo "=== Verifying Solana & Anchor ==="
         solana --version
         anchor --version
         node --version
+        npm --version
 
-    # -------------------------------
-    # ✅ Clean Solana + Anchor caches
-    # -------------------------------
-    - name: Clean Solana & Anchor caches
-      run: |
-        echo "🧹 Cleaning old Solana and Anchor artifacts..."
-        rm -rf ~/.config/solana
-        rm -rf ~/.local/share/solana
-        rm -rf target/deploy
-        rm -rf target/idl
-        rm -rf target/types
-        rm -rf .anchor
-        echo "✅ Cache cleanup complete"
-
-    # -------------------------------
-    # ✅ Configure Solana CLI
-    # -------------------------------
+    # ==============================
+    # Configure Solana CLI
+    # ==============================
     - name: Configure Solana CLI for Devnet
       run: |
         solana config set --url https://api.devnet.solana.com
         solana config set --commitment confirmed
 
-    # -------------------------------
-    # ✅ Create wallet from secret
-    # -------------------------------
+    # ==============================
+    # Setup wallet from GitHub Secret
+    # ==============================
     - name: Create wallet from secret
       run: |
         mkdir -p ~/.config/solana
         echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > ~/.config/solana/id.json
         chmod 600 ~/.config/solana/id.json
-        solana address
 
-    # -------------------------------
-    # ✅ Request airdrop (if needed)
-    # -------------------------------
+    - name: Show wallet address
+      run: |
+        WALLET=$(solana address)
+        echo "Wallet: $WALLET"
+        echo "WALLET_ADDRESS=$WALLET" >> $GITHUB_ENV
+
+    # ==============================
+    # Airdrop if low balance
+    # ==============================
     - name: Request airdrop (if balance < 1 SOL)
       run: |
         BALANCE=$(solana balance | awk '{print $1}')
-        echo "💰 Current balance: $BALANCE"
+        echo "Current balance: $BALANCE"
         if (( $(echo "$BALANCE < 1.0" | bc -l) )); then
           echo "Requesting airdrop..."
           for i in {1..3}; do
@@ -115,26 +92,20 @@ jobs:
           solana balance
         fi
 
-    # -------------------------------
-    # ✅ Build dependencies
-    # -------------------------------
-    - name: Build dependencies
+    # ==============================
+    # Build and Deploy Program
+    # ==============================
+    - name: Install dependencies
       run: |
         cd Backend
         cargo build --release
 
-    # -------------------------------
-    # ✅ Build program
-    # -------------------------------
-    - name: Build program
+    - name: Build Solana program
       run: |
         cd Backend
         anchor build --verbose
 
-    # -------------------------------
-    # ✅ Deploy program
-    # -------------------------------
-    - name: Deploy program
+    - name: Deploy Solana program
       run: |
         cd Backend
         for i in {1..3}; do
@@ -143,31 +114,24 @@ jobs:
           sleep 5
         done
 
-    # -------------------------------
-    # ✅ Extract Program ID
-    # -------------------------------
-    - name: Extract Program ID
+    # ==============================
+    # Update Anchor.toml with Program ID
+    # ==============================
+    - name: Extract and Update Program ID
       run: |
         cd Backend
         PROGRAM_ID=$(solana address -k target/deploy/counter.json)
         echo "Program ID: $PROGRAM_ID"
         echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
         echo "$PROGRAM_ID" > program_id.txt
-
-    # -------------------------------
-    # ✅ Update Anchor.toml
-    # -------------------------------
-    - name: Update Anchor.toml with Program ID
-      run: |
-        cd Backend
         cp Anchor.toml Anchor.toml.backup
         sed -i "/\[programs.devnet\]/,/^\[/ s/counter = \".*\"/counter = \"${{ env.PROGRAM_ID }}\"/" Anchor.toml
-        echo "Updated Anchor.toml with new Program ID."
+        echo "Updated Anchor.toml with new Program ID:"
         cat Anchor.toml
 
-    # -------------------------------
-    # ✅ Upload artifacts
-    # -------------------------------
+    # ==============================
+    # Upload Artifacts
+    # ==============================
     - name: Upload Program ID
       uses: actions/upload-artifact@v4
       with:
@@ -180,9 +144,9 @@ jobs:
         name: anchor-config
         path: Backend/Anchor.toml
 
-    # -------------------------------
-    # ✅ Commit updated Anchor.toml
-    # -------------------------------
+    # ==============================
+    # Commit Updated Config
+    # ==============================
     - name: Commit updated Anchor.toml
       run: |
         cd Backend
@@ -196,18 +160,17 @@ jobs:
           git push
         fi
 
-    # -------------------------------
-    # ✅ Final Deployment Summary
-    # -------------------------------
+    # ==============================
+    # Final Summary
+    # ==============================
     - name: Display Summary
       run: |
         echo "=========================================="
         echo "🎉 DEPLOYMENT SUCCESSFUL 🎉"
         echo "=========================================="
         echo "Program ID: ${{ env.PROGRAM_ID }}"
-        echo "Wallet Address: $(solana address)"
+        echo "Wallet Address: ${{ env.WALLET_ADDRESS }}"
         echo "Network: Devnet"
         solana --version
         anchor --version
-        rustc --version
         echo "=========================================="
