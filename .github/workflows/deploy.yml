@@ -11,101 +11,100 @@ jobs:
     timeout-minutes: 60
     
     steps:
+    # -------------------------------
+    # ✅ Checkout code
+    # -------------------------------
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    # -------------------------------
+    # ✅ Extract Solana & Anchor versions
+    # -------------------------------
     - name: Extract versions from Cargo.lock
       uses: solana-developers/github-actions/extract-versions@v0.2.7
       id: versions
 
-    - name: Setup Solana, Anchor, and Node.js
+    # -------------------------------
+    # ✅ Install Rust toolchain
+    # -------------------------------
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        override: true
+
+    # -------------------------------
+    # ✅ Install Solana CLI (Official)
+    # -------------------------------
+    - name: Install Solana CLI
+      run: |
+        echo "=== Installing Solana CLI ==="
+        sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
+        export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+        solana --version
+
+    # -------------------------------
+    # ✅ Setup Anchor and Node.js
+    # -------------------------------
+    - name: Setup Anchor and Node.js
       uses: solana-developers/github-actions/setup-all@v0.2.7
       with:
-        solana_version: ${{ steps.versions.outputs.solana_version }}
         anchor_version: ${{ steps.versions.outputs.anchor_version }}
         node_version: 20
 
-    - name: Verify and fix installations
+    # -------------------------------
+    # ✅ Verify installations
+    # -------------------------------
+    - name: Verify installations
       run: |
         echo "=== Verifying installations ==="
-        echo "Current PATH: $PATH"
-        
-        # Check if solana is available
-        if ! command -v solana &> /dev/null; then
-          echo "❌ Solana CLI not found, installing manually..."
-          SOLANA_VERSION=${{ steps.versions.outputs.solana_version }}
-          if [ -z "$SOLANA_VERSION" ]; then
-            SOLANA_VERSION="1.18.20"
-            echo "No solana_version found in Cargo.lock, using fallback: $SOLANA_VERSION"
-          fi
-          # Try solana-install init first
-          solana-install init $SOLANA_VERSION --no-modify-path || {
-            echo "solana-install init failed, trying curl method..."
-            sh -c "$(curl -sSfL https://release.solana.com/$SOLANA_VERSION/install)" || {
-              echo "Failed to install Solana CLI"; exit 1;
-            }
-          }
-          # Ensure binary exists
-          if [ ! -f "$HOME/.local/share/solana/install/active_release/bin/solana" ]; then
-            echo "❌ Solana binary not found at $HOME/.local/share/solana/install/active_release/bin/solana"
-            ls -la $HOME/.local/share/solana/install/active_release/bin || true
-            exit 1
-          fi
-          # Make binary executable
-          chmod +x $HOME/.local/share/solana/install/active_release/bin/solana
-          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-          echo "Updated PATH: $PATH"
-          if ! command -v solana &> /dev/null; then
-            echo "❌ Solana CLI still not found after installation"
-            ls -la $HOME/.local/share/solana/install/active_release/bin || true
-            exit 1
-          fi
-          echo "✅ Solana CLI installed manually"
-        else
-          echo "✅ Solana CLI found"
-        fi
-        
-        # Check if anchor is available
-        if ! command -v anchor &> /dev/null; then
-          echo "❌ Anchor CLI not found, installing manually..."
-          ANCHOR_VERSION=${{ steps.versions.outputs.anchor_version }}
-          if [ -z "$ANCHOR_VERSION" ]; then
-            ANCHOR_VERSION="0.31.1"
-            echo "No anchor_version found in Cargo.lock, using fallback: $ANCHOR_VERSION"
-          fi
-          cargo install --git https://github.com/coral-xyz/anchor anchor-cli --version $ANCHOR_VERSION --force || { echo "Failed to install Anchor CLI"; exit 1; }
-          echo "✅ Anchor CLI installed manually"
-        else
-          echo "✅ Anchor CLI found"
-        fi
-        
-        # Final verification
-        echo "Final verification:"
-        solana --version || { echo "Solana CLI verification failed"; exit 1; }
-        anchor --version || { echo "Anchor CLI verification failed"; exit 1; }
+        rustc --version
+        cargo --version
+        solana --version
+        anchor --version
+        node --version
 
+    # -------------------------------
+    # ✅ Clean Solana + Anchor caches
+    # -------------------------------
+    - name: Clean Solana & Anchor caches
+      run: |
+        echo "🧹 Cleaning old Solana and Anchor artifacts..."
+        rm -rf ~/.config/solana
+        rm -rf ~/.local/share/solana
+        rm -rf target/deploy
+        rm -rf target/idl
+        rm -rf target/types
+        rm -rf .anchor
+        echo "✅ Cache cleanup complete"
+
+    # -------------------------------
+    # ✅ Configure Solana CLI
+    # -------------------------------
     - name: Configure Solana CLI for Devnet
       run: |
         solana config set --url https://api.devnet.solana.com
         solana config set --commitment confirmed
 
+    # -------------------------------
+    # ✅ Create wallet from secret
+    # -------------------------------
     - name: Create wallet from secret
       run: |
         mkdir -p ~/.config/solana
         echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > ~/.config/solana/id.json
         chmod 600 ~/.config/solana/id.json
+        solana address
 
-    - name: Show wallet address
-      run: |
-        WALLET=$(solana address)
-        echo "Wallet: $WALLET"
-        echo "WALLET_ADDRESS=$WALLET" >> $GITHUB_ENV
-
+    # -------------------------------
+    # ✅ Request airdrop (if needed)
+    # -------------------------------
     - name: Request airdrop (if balance < 1 SOL)
       run: |
         BALANCE=$(solana balance | awk '{print $1}')
-        echo "Current balance: $BALANCE"
+        echo "💰 Current balance: $BALANCE"
         if (( $(echo "$BALANCE < 1.0" | bc -l) )); then
           echo "Requesting airdrop..."
           for i in {1..3}; do
@@ -116,16 +115,25 @@ jobs:
           solana balance
         fi
 
-    - name: Install dependencies
+    # -------------------------------
+    # ✅ Build dependencies
+    # -------------------------------
+    - name: Build dependencies
       run: |
         cd Backend
         cargo build --release
 
+    # -------------------------------
+    # ✅ Build program
+    # -------------------------------
     - name: Build program
       run: |
         cd Backend
         anchor build --verbose
 
+    # -------------------------------
+    # ✅ Deploy program
+    # -------------------------------
     - name: Deploy program
       run: |
         cd Backend
@@ -135,6 +143,9 @@ jobs:
           sleep 5
         done
 
+    # -------------------------------
+    # ✅ Extract Program ID
+    # -------------------------------
     - name: Extract Program ID
       run: |
         cd Backend
@@ -143,6 +154,9 @@ jobs:
         echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
         echo "$PROGRAM_ID" > program_id.txt
 
+    # -------------------------------
+    # ✅ Update Anchor.toml
+    # -------------------------------
     - name: Update Anchor.toml with Program ID
       run: |
         cd Backend
@@ -151,6 +165,9 @@ jobs:
         echo "Updated Anchor.toml with new Program ID."
         cat Anchor.toml
 
+    # -------------------------------
+    # ✅ Upload artifacts
+    # -------------------------------
     - name: Upload Program ID
       uses: actions/upload-artifact@v4
       with:
@@ -163,6 +180,9 @@ jobs:
         name: anchor-config
         path: Backend/Anchor.toml
 
+    # -------------------------------
+    # ✅ Commit updated Anchor.toml
+    # -------------------------------
     - name: Commit updated Anchor.toml
       run: |
         cd Backend
@@ -176,14 +196,18 @@ jobs:
           git push
         fi
 
+    # -------------------------------
+    # ✅ Final Deployment Summary
+    # -------------------------------
     - name: Display Summary
       run: |
         echo "=========================================="
         echo "🎉 DEPLOYMENT SUCCESSFUL 🎉"
         echo "=========================================="
         echo "Program ID: ${{ env.PROGRAM_ID }}"
-        echo "Wallet Address: ${{ env.WALLET_ADDRESS }}"
+        echo "Wallet Address: $(solana address)"
         echo "Network: Devnet"
-        echo "Solana Version: ${{ steps.versions.outputs.solana_version }}"
-        echo "Anchor Version: ${{ steps.versions.outputs.anchor_version }}"
+        solana --version
+        anchor --version
+        rustc --version
         echo "=========================================="
