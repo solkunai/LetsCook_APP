@@ -1,0 +1,22 @@
+[package]
+name = "letscook_listings"
+version = "0.0.1"
+description = "Example template program written in Rust"
+authors = ["Solana Maintainers <maintainers@solana.com>"]
+repository = "https://github.com/solana-labs/solana"
+license = "Apache-2.0"
+homepage = "https://solana.com/"
+edition = "2018"
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+borsh = "0.9.3"
+borsh-derive = "0.10.0"
+solana-program = "=1.18.5"
+shank = "0.4.2"
+
+[lib]
+name = "letscook_listings"
+crate-type = ["cdylib", "lib"]

@@ -1,0 +1,6 @@
+max_width = 150
+# Indentation style (tabs or spaces)
+hard_tabs = false
+
+# Number of spaces per tab
+tab_spaces = 4

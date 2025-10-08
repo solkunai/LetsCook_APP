@@ -1,0 +1,492 @@
+import { useState, useEffect } from "react";
+import BottomNav from "@/components/BottomNav";
+import SaucePointsTracker from "@/components/SaucePointsTracker";
+import SaucePointsBadge from "@/components/SaucePointsBadge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { TrendingUp, TrendingDown, ArrowDown, Repeat, ThumbsUp, ThumbsDown, Users, Activity, Gift } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+// todo: remove mock functionality - these would come from completed raffles
+const lcLaunchedTokens = [
+  { 
+    symbol: "SPCY", 
+    name: "Spicy Token", 
+    price: 1.05, 
+    change24h: 12.5, 
+    volume24h: 52500, 
+    holders: 1250,
+    upvotes: 89,
+    downvotes: 12
+  },
+  { 
+    symbol: "CHEF", 
+    name: "Chef Coin", 
+    price: 0.85, 
+    change24h: -3.2, 
+    volume24h: 28000, 
+    holders: 856,
+    upvotes: 45,
+    downvotes: 23
+  },
+  { 
+    symbol: "HOT", 
+    name: "Hot Sauce", 
+    price: 2.30, 
+    change24h: 8.7, 
+    volume24h: 45000, 
+    holders: 2100,
+    upvotes: 156,
+    downvotes: 8
+  },
+];
+
+const mockSauceData = {
+  totalPoints: 750,
+  activities: [],
+  showLeaderboard: true,
+  leaderboardData: [
+    { rank: 1, username: "master_chef", points: 2500 },
+    { rank: 2, username: "hot_cook", points: 1800 },
+    { rank: 3, username: "spicy_trader", points: 1200 },
+  ],
+};
+
+// todo: remove mock functionality - these would come from backend API
+const mockMarketMakingRewards = [
+  {
+    tokenSymbol: "SPCY",
+    tokenName: "Spicy Token",
+    rewardAmount: 125.50,
+    rewardToken: "SPCY",
+    launchDate: "2025-02-15",
+    claimed: false,
+  },
+  {
+    tokenSymbol: "CHEF",
+    tokenName: "Chef Coin",
+    rewardAmount: 89.25,
+    rewardToken: "CHEF",
+    launchDate: "2025-02-20",
+    claimed: false,
+  },
+  {
+    tokenSymbol: "HOT",
+    tokenName: "Hot Sauce",
+    rewardAmount: 0,
+    rewardToken: "HOT",
+    launchDate: "2025-02-10",
+    claimed: true,
+  },
+];
+
+export default function TradePage() {
+  const [activeTab, setActiveTab] = useState("trade");
+  const [fromToken, setFromToken] = useState("SOL");
+  const [toToken, setToToken] = useState("SPCY");
+  const [fromAmount, setFromAmount] = useState("");
+  const [toAmount, setToAmount] = useState("");
+  const [userVotes, setUserVotes] = useState<{ [key: string]: 'up' | 'down' | null }>({});
+  const [claimedRewards, setClaimedRewards] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
+
+  const fromTokenData = lcLaunchedTokens.find(t => t.symbol === fromToken);
+  const toTokenData = lcLaunchedTokens.find(t => t.symbol === toToken);
+  const mockUserBalance: { [key: string]: number } = { sol: 10.5, spcy: 250, chef: 150, hot: 80 };
+
+  const handleVote = (symbol: string, voteType: 'up' | 'down') => {
+    setUserVotes(prev => {
+      const currentVote = prev[symbol];
+      const newVote = currentVote === voteType ? null : voteType;
+      return {
+        ...prev,
+        [symbol]: newVote
+      };
+    });
+  };
+
+  // Recalculate toAmount whenever tokens or fromAmount changes
+  useEffect(() => {
+    if (!fromAmount || parseFloat(fromAmount) <= 0 || fromToken === toToken) {
+      setToAmount("");
+      return;
+    }
+
+    const value = parseFloat(fromAmount);
+    
+    // Handle SOL to Token swap
+    if (fromToken === "SOL" && toTokenData) {
+      setToAmount((value / toTokenData.price).toFixed(4));
+    }
+    // Handle Token to SOL swap
+    else if (toToken === "SOL" && fromTokenData) {
+      setToAmount((value * fromTokenData.price).toFixed(4));
+    }
+    // Handle Token to Token swap
+    else if (fromTokenData && toTokenData) {
+      const solValue = value * fromTokenData.price;
+      setToAmount((solValue / toTokenData.price).toFixed(4));
+    }
+  }, [fromToken, toToken, fromAmount, fromTokenData, toTokenData]);
+
+  const handleSwap = () => {
+    console.log(`Swapping ${fromAmount} ${fromToken} for ${toAmount} ${toToken}`);
+    setFromAmount("");
+    setToAmount("");
+  };
+
+  const handleFlipTokens = () => {
+    const temp = fromToken;
+    setFromToken(toToken);
+    setToToken(temp);
+  };
+
+  const handleFromAmountChange = (value: string) => {
+    setFromAmount(value);
+  };
+
+  const handleClaimReward = (tokenSymbol: string, amount: number) => {
+    setClaimedRewards(prev => new Set(prev).add(tokenSymbol));
+    toast({
+      title: "Rewards Claimed!",
+      description: `Successfully claimed ${amount.toFixed(2)} ${tokenSymbol} market making rewards.`,
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-background pb-20">
+      {/* Header */}
+      <header className="bg-card border-b border-border p-6 relative">
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <TrendingUp className="w-6 h-6 text-primary" />
+              <div>
+                <h1 className="text-2xl font-heading font-bold">Trade & Rewards</h1>
+                <p className="text-muted-foreground text-sm mt-1">Swap LC tokens</p>
+              </div>
+            </div>
+            <SaucePointsBadge points={mockSauceData.totalPoints} />
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-lg mx-auto px-4 py-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="trade" data-testid="tab-trade">Swap</TabsTrigger>
+            <TabsTrigger value="rewards" data-testid="tab-rewards">Rewards</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="trade" className="mt-6 space-y-4">
+            {/* Token Stats */}
+            {(fromTokenData || toTokenData) && (() => {
+              const displayToken = toTokenData || fromTokenData!;
+              const voteStatus = userVotes[displayToken.symbol];
+              const totalVotes = displayToken.upvotes + displayToken.downvotes;
+              const upvotePercent = totalVotes > 0 ? (displayToken.upvotes / totalVotes * 100).toFixed(0) : 0;
+              
+              return (
+                <Card className="p-6">
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="text-xl font-bold">{displayToken.name}</h3>
+                        <p className="text-sm text-muted-foreground">${displayToken.symbol}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-primary">${displayToken.price.toFixed(4)}</p>
+                        <div className="flex items-center justify-end gap-1">
+                          {displayToken.change24h >= 0 ? (
+                            <TrendingUp className="w-4 h-4 text-secondary" />
+                          ) : (
+                            <TrendingDown className="w-4 h-4 text-destructive" />
+                          )}
+                          <p className={`text-sm font-semibold ${displayToken.change24h >= 0 ? 'text-secondary' : 'text-destructive'}`}>
+                            {displayToken.change24h >= 0 ? '+' : ''}{displayToken.change24h.toFixed(2)}%
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4 pt-2 border-t">
+                      <div>
+                        <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                          <Activity className="w-3 h-3" />
+                          <span className="text-xs">24h Volume</span>
+                        </div>
+                        <p className="text-sm font-semibold">${displayToken.volume24h.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                          <Users className="w-3 h-3" />
+                          <span className="text-xs">Holders</span>
+                        </div>
+                        <p className="text-sm font-semibold">{displayToken.holders.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                          <ThumbsUp className="w-3 h-3" />
+                          <span className="text-xs">Community</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant={voteStatus === 'up' ? 'default' : 'ghost'}
+                            className="h-6 px-2"
+                            onClick={() => handleVote(displayToken.symbol, 'up')}
+                            data-testid={`button-upvote-${displayToken.symbol.toLowerCase()}`}
+                          >
+                            <ThumbsUp className="w-3 h-3" />
+                          </Button>
+                          <span className="text-xs font-semibold text-muted-foreground">{upvotePercent}%</span>
+                          <Button
+                            size="sm"
+                            variant={voteStatus === 'down' ? 'destructive' : 'ghost'}
+                            className="h-6 px-2"
+                            onClick={() => handleVote(displayToken.symbol, 'down')}
+                            data-testid={`button-downvote-${displayToken.symbol.toLowerCase()}`}
+                          >
+                            <ThumbsDown className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })()}
+
+            {/* Swap Interface */}
+            <Card className="p-6">
+              <h3 className="font-semibold mb-4">Swap Tokens</h3>
+              
+              <div className="space-y-2">
+                <Label>From</Label>
+                <div className="flex gap-2">
+                  <Select value={fromToken} onValueChange={setFromToken}>
+                    <SelectTrigger className="w-32" data-testid="select-from-token">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SOL">SOL</SelectItem>
+                      {lcLaunchedTokens.map(token => (
+                        <SelectItem key={token.symbol} value={token.symbol}>{token.symbol}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    value={fromAmount}
+                    onChange={(e) => handleFromAmountChange(e.target.value)}
+                    placeholder="0.00"
+                    className="flex-1"
+                    data-testid="input-from-amount"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Balance: {fromToken === "SOL" ? mockUserBalance.sol.toFixed(4) : mockUserBalance[fromToken.toLowerCase()]?.toFixed(2) || "0.00"} {fromToken}
+                </p>
+              </div>
+
+              <div className="flex justify-center my-3">
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  onClick={handleFlipTokens}
+                  className="rounded-full"
+                  data-testid="button-flip-tokens"
+                >
+                  <ArrowDown className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Label>To</Label>
+                <div className="flex gap-2">
+                  <Select value={toToken} onValueChange={setToToken}>
+                    <SelectTrigger className="w-32" data-testid="select-to-token">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SOL">SOL</SelectItem>
+                      {lcLaunchedTokens.map(token => (
+                        <SelectItem key={token.symbol} value={token.symbol}>{token.symbol}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    value={toAmount}
+                    readOnly
+                    placeholder="0.00"
+                    className="flex-1 bg-muted"
+                    data-testid="input-to-amount"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Balance: {toToken === "SOL" ? mockUserBalance.sol.toFixed(4) : mockUserBalance[toToken.toLowerCase()]?.toFixed(2) || "0.00"} {toToken}
+                </p>
+              </div>
+
+              <Button 
+                className="w-full mt-6" 
+                onClick={handleSwap}
+                disabled={!fromAmount || parseFloat(fromAmount) <= 0 || fromToken === toToken}
+                data-testid="button-swap"
+              >
+                <Repeat className="w-4 h-4 mr-2" />
+                Swap
+              </Button>
+            </Card>
+
+            {/* Available Tokens */}
+            <div>
+              <h3 className="font-semibold mb-3">LC Launched Tokens</h3>
+              <div className="space-y-3">
+                {lcLaunchedTokens.map(token => {
+                  const voteStatus = userVotes[token.symbol];
+                  const totalVotes = token.upvotes + token.downvotes;
+                  const upvotePercent = totalVotes > 0 ? (token.upvotes / totalVotes * 100).toFixed(0) : 0;
+                  
+                  return (
+                    <Card 
+                      key={token.symbol} 
+                      className={`p-4 hover-elevate cursor-pointer transition-all ${toToken === token.symbol ? 'border-primary' : ''}`}
+                      onClick={() => setToToken(token.symbol)}
+                      data-testid={`card-token-${token.symbol.toLowerCase()}`}
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="font-semibold">{token.name}</h4>
+                            <p className="text-xs text-muted-foreground">${token.symbol}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold">${token.price.toFixed(4)}</p>
+                            <p className={`text-xs font-semibold ${token.change24h >= 0 ? 'text-secondary' : 'text-destructive'}`}>
+                              {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(2)}%
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-xs pt-2 border-t">
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <span className="text-muted-foreground">Vol: </span>
+                              <span className="font-semibold">${(token.volume24h / 1000).toFixed(1)}K</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Holders: </span>
+                              <span className="font-semibold">{token.holders.toLocaleString()}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant={voteStatus === 'up' ? 'default' : 'ghost'}
+                              className="h-5 w-5 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleVote(token.symbol, 'up');
+                              }}
+                              data-testid={`button-upvote-card-${token.symbol.toLowerCase()}`}
+                            >
+                              <ThumbsUp className="w-3 h-3" />
+                            </Button>
+                            <span className="text-xs font-semibold text-muted-foreground min-w-[28px] text-center">{upvotePercent}%</span>
+                            <Button
+                              size="sm"
+                              variant={voteStatus === 'down' ? 'destructive' : 'ghost'}
+                              className="h-5 w-5 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleVote(token.symbol, 'down');
+                              }}
+                              data-testid={`button-downvote-card-${token.symbol.toLowerCase()}`}
+                            >
+                              <ThumbsDown className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="rewards" className="mt-6 space-y-4">
+            {/* Market Making Rewards */}
+            <Card className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Gift className="w-5 h-5 text-primary" />
+                <h3 className="font-heading font-semibold text-lg">Market Making Rewards</h3>
+              </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                Claim your rewards from token launches where you participated in market making activities.
+              </p>
+              <div className="space-y-3">
+                {mockMarketMakingRewards.map((reward) => {
+                  const isClaimed = reward.claimed || claimedRewards.has(reward.tokenSymbol);
+                  const hasRewards = reward.rewardAmount > 0;
+
+                  return (
+                    <div
+                      key={reward.tokenSymbol}
+                      className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border border-border"
+                      data-testid={`reward-item-${reward.tokenSymbol.toLowerCase()}`}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <div>
+                            <h4 className="font-semibold">{reward.tokenName}</h4>
+                            <p className="text-xs text-muted-foreground">${reward.tokenSymbol}</p>
+                          </div>
+                          {isClaimed && (
+                            <Badge variant="secondary" className="text-xs">
+                              Claimed
+                            </Badge>
+                          )}
+                          {!hasRewards && !isClaimed && (
+                            <Badge variant="outline" className="text-xs">
+                              No Rewards
+                            </Badge>
+                          )}
+                        </div>
+                        {hasRewards && !isClaimed && (
+                          <p className="text-sm text-primary font-semibold mt-1">
+                            {reward.rewardAmount.toFixed(2)} {reward.rewardToken} available
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        onClick={() => handleClaimReward(reward.tokenSymbol, reward.rewardAmount)}
+                        disabled={isClaimed || !hasRewards}
+                        size="sm"
+                        data-testid={`button-claim-${reward.tokenSymbol.toLowerCase()}`}
+                      >
+                        {isClaimed ? "Claimed" : "Claim"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            {/* Sauce Points Tracker */}
+            <SaucePointsTracker {...mockSauceData} />
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      <BottomNav />
+    </div>
+  );
+}

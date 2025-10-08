@@ -1,0 +1,12 @@
+UI Elements:Typography: Use a bold, modern sans-serif font (e.g., Poppins or Montserrat) for headings and a clean sans-serif (e.g., Inter) for body text. Ensure readability with high contrast (white text on dark blue, red accents for CTAs).
+Icons and Graphics: Incorporate a stylized red flame and chef’s hat as recurring motifs (e.g., in buttons, loading animations, or badges). Use minimalistic crypto-inspired icons (e.g., SOL coin, ticket stubs) for navigation.
+Buttons and CTAs: Vibrant red buttons with subtle hover animations (e.g., glow or scale) for actions like “Buy Tickets,” “Claim Tokens,” or “Generate Referral Code.” Include micro-interactions for feedback (e.g., confetti for earning Sauce Points).
+Navigation: A bottom navigation bar with icons for Home, Calendar, Profile, Referrals, and Trade. Add a floating action button (red flame icon) for quick access to creating or joining raffles.
+UX Flow:Onboarding: A 3-step onboarding screen (connect wallet, create username, opt-in for referrals) with a welcoming chef-themed animation (e.g., a chef tossing a coin into a pot).
+Raffle Workflow: Smooth transitions between browsing raffles, buying tickets, checking results, and claiming winnings/refunds. Use progress indicators for raffle stages (Open, Closed, Results).
+Rewards Engagement: A gamified rewards page showing Sauce Points earned per action (e.g., +10 for buying a ticket, +50 for referring a friend). Include a leaderboard for top earners.
+Error Handling: Friendly error messages with chef-themed humor (e.g., “Oops, the sauce spilled! Try again.”) for failed transactions or invalid inputs.
+Aesthetic and Vibe:Fun and Engaging: Infuse a playful, crypto-friendly vibe with subtle animations (e.g., flames flickering, tickets flipping). Use chef-related puns in tooltips or notifications (e.g., “Let’s heat up this raffle!”).
+Clean and Professional: Avoid clutter with ample white space, consistent spacing, and a grid-based layout. Ensure intuitive navigation for crypto novices and experts alike.
+Crypto Community Appeal: Incorporate subtle nods to memecoin culture (e.g., a “To the Moon” badge for high Sauce Points earners) while keeping the design polished.
+

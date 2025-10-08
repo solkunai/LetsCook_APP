@@ -1,0 +1,134 @@
+Let's Cook: Raffle-Based Token
+Launchpad on Solana
+Outsmarting the Dev Dump
+Picture this: You’re hyped for a new memecoin launch. You ape in early, your wallet’s ready, and
+you’re dreaming of 10x gains. But before the token even bonds, BAM—the devs dump their
+bags, the price tanks, and your SOL is gone. Sound familiar? We’ve all been burned by those
+shady launches where the only winners are the devs cashing out.
+Not anymore. Let's Cook flips the script. Our raffle-based launchpad on Solana ensures a fair
+shot for everyone—no more losing your hard-earned SOL to instant dumps. With transparent
+raffles, guaranteed refunds for losing tickets, and automated liquidity pools, we’re cooking up a
+recipe for safe, fun, and equitable token launches. Say goodbye to the old playbook and hello to
+a tastier way to launch!
+Overview
+Let's Cook is a mobile application built on the Solana blockchain, revolutionizing token
+launches with a raffle-style mechanism. Designed to address the frustrations of unfair launches
+and dev dumps, it ensures safe, transparent, and engaging token distributions for users and
+customizable options for developers. By leveraging Solana’s high-speed, low-cost transactions,
+Let's Cook creates a vibrant ecosystem for memecoins and beyond.
+Purpose
+The raffle-based approach delivers:
+●
+Fairness: Equal chances for all participants via randomized winning tickets.
+●
+Safety: Refunds for losing tickets and failed raffles protect users from losses.
+●
+Engagement: A gamified raffle system makes launches exciting and accessible.
+●
+Flexibility: Developers can tailor tokenomics to fit their project’s vision.
+Key Features
+1. Raffle-Based Token Launches: Users buy tickets for a chance at token allocations,
+with losing tickets refunded (minus a small platform fee), preventing losses from dev
+dumps.
+2. Customizable Tokenomics: Developers allocate percentages for airdrops, marketing,
+market-making rewards, team, and liquidity pools (e.g., $TOKEN/SOL).
+3. Guaranteed Liquidity Threshold: Ensures sufficient funds for a viable liquidity pool; if
+unmet, raffles fail, and all tickets are refunded, safeguarding user investments.
+4. Automated Liquidity Pool Deployment: Triggered by the first winning ticket claim,
+enabling immediate trading without manual intervention.
+5. User-Friendly Mobile App: Browse raffles, purchase tickets, and claim winnings with an
+intuitive, vibrant interface.
+Raffle Workflow
+The raffle process is designed for simplicity, transparency, and user protection, addressing
+common pain points in token launches.
+1. Raffle Creation
+●
+Token Creator Actions:
+●
+Define raffle parameters: ticket price, number of winning tickets, guaranteed
+liquidity threshold, and reward structure.
+●
+Customize tokenomics: Set allocations for airdrops, marketing, market-making
+rewards, team, and liquidity pool ($TOKEN/SOL).
+●
+Outcome: A raffle is listed on the platform, ready for user participation, with clear rules
+to prevent dev manipulation.
+2. Browsing Raffles
+●
+User Actions:
+●
+Explore active raffles on the homepage or Calendar page.
+●
+Filter by specific days or date ranges for easy discovery.
+●
+Outcome: Users find exciting raffles with transparent details like ticket price and winning
+odds.
+3. Buying Tickets
+●
+User Actions:
+●
+During the open period, users purchase unlimited tickets at a fixed price.
+●
+Real-time odds update as more tickets are sold, ensuring transparency.
+●
+Outcome: Users secure their chance at token allocations without fear of instant dumps.
+4. Raffle Closing
+●
+System Action:
+●
+Ticket sales halt at the end of the raffle period.
+●
+Total tickets sold determine the final winning odds.
+●
+Outcome: The raffle locks, ensuring no last-minute manipulations, and results are
+prepared.
+5. Checking Tickets
+●
+User Actions:
+●
+Users view their tickets in the app to see which are winning or losing, based on
+the preset number of winning tickets.
+●
+Outcome: Clear, tamper-proof results show who wins token allocations.
+6. Claiming Winning Tickets
+●
+User Actions:
+●
+Winning ticket holders claim their equal token allocations.
+●
+Losing ticket holders receive refunds (minus platform fees).
+●
+Outcome: Winners get tokens, and losers are protected with refunds, mitigating losses
+from failed launches.
+7. Guaranteed Liquidity Threshold
+●
+System Action:
+●
+If ticket sales meet or exceed the liquidity threshold, the raffle succeeds.
+●
+If unmet, the raffle fails, and all tickets are refunded in full.
+●
+Outcome: Ensures only viable projects proceed, protecting users from underfunded
+launches.
+8. Automated Liquidity Pool Deployment
+●
+System Action:
+●
+The first winning ticket claim triggers a liquidity pool ($TOKEN/SOL) on a
+supported AMM (e.g., Raydium or CookAMM).
+●
+Outcome: Tokens are tradable immediately, reducing the risk of price crashes due to
+delayed liquidity.
+Why Let's Cook?
+●
+No More Dev Dumps: The raffle system and liquidity threshold ensure fair launches,
+protecting users from instant sell-offs.
+●
+Fair and Inclusive: Randomized ticket draws give everyone an equal shot at tokens.
+●
+Safe and Transparent: Refunds for losing tickets and failed raffles build user trust.
+●
+Developer-Friendly: Customizable tokenomics empower creators to align launches with
+their goals.
+●
+Fun and Engaging: A gamified, vibrant app experience attracts a broad user base.

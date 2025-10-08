@@ -1,0 +1,139 @@
+name: Deploy Solana Program to Devnet
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+          
+    - name: Install Solana CLI
+      run: |
+        sh -c "$(curl -sSfL https://release.solana.com/v1.18.11/install)"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+        
+    - name: Install Anchor CLI
+      run: |
+        cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked --force
+        
+    - name: Verify installations
+      run: |
+        rustc --version
+        solana --version
+        anchor --version
+        
+    - name: Configure Solana CLI for Devnet
+      run: |
+        solana config set --url https://api.devnet.solana.com
+        solana config set --commitment confirmed
+        
+    - name: Create wallet from secret
+      run: |
+        echo "${{ secrets.SOLANA_WALLET_KEY }}" > ~/.config/solana/id.json
+        chmod 600 ~/.config/solana/id.json
+        
+    - name: Get wallet address
+      run: |
+        WALLET_ADDRESS=$(solana address)
+        echo "Wallet Address: $WALLET_ADDRESS"
+        echo "WALLET_ADDRESS=$WALLET_ADDRESS" >> $GITHUB_ENV
+        
+    - name: Request airdrop (if needed)
+      run: |
+        BALANCE=$(solana balance)
+        echo "Current balance: $BALANCE SOL"
+        if (( $(echo "$BALANCE < 1.0" | bc -l) )); then
+          echo "Requesting airdrop..."
+          solana airdrop 2
+        else
+          echo "Sufficient balance, no airdrop needed"
+        fi
+        
+    - name: Build program
+      run: |
+        cd Backend
+        anchor build
+        
+    - name: Deploy program
+      run: |
+        cd Backend
+        anchor deploy
+        
+    - name: Extract Program ID
+      run: |
+        cd Backend
+        PROGRAM_ID=$(solana address -k target/deploy/lets_cook-keypair.json)
+        echo "Program ID: $PROGRAM_ID"
+        echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
+        echo "$PROGRAM_ID" > program_id.txt
+        
+    - name: Display Program ID
+      run: |
+        echo "=========================================="
+        echo "🎉 DEPLOYMENT SUCCESSFUL! 🎉"
+        echo "=========================================="
+        echo "Program ID: ${{ env.PROGRAM_ID }}"
+        echo "Wallet Address: ${{ env.WALLET_ADDRESS }}"
+        echo "Network: Devnet"
+        echo "=========================================="
+        
+    - name: Update Anchor.toml with Program ID
+      run: |
+        cd Backend
+        PROGRAM_ID="${{ env.PROGRAM_ID }}"
+        
+        # Create backup
+        cp Anchor.toml Anchor.toml.backup
+        
+        # Update Anchor.toml with new program ID
+        sed -i "s/lets_cook = \".*\"/lets_cook = \"$PROGRAM_ID\"/" Anchor.toml
+        
+        echo "Updated Anchor.toml with Program ID: $PROGRAM_ID"
+        
+    - name: Upload Program ID as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: program-id
+        path: Backend/program_id.txt
+        retention-days: 30
+        
+    - name: Upload updated Anchor.toml as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: anchor-config
+        path: Backend/Anchor.toml
+        retention-days: 30
+        
+    - name: Commit updated Anchor.toml
+      run: |
+        cd Backend
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add Anchor.toml
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update Program ID to ${{ env.PROGRAM_ID }} [skip ci]"
+          git push
+        fi

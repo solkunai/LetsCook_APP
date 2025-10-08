@@ -1,0 +1,89 @@
+/* Wallet Adapter Button Customization */
+.wallet-adapter-button-custom {
+  background: linear-gradient(135deg, var(--electric-blue), var(--cosmic-purple)) !important;
+  color: var(--star-white) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+  padding: var(--space-3) var(--space-6) !important;
+  border-radius: var(--radius-lg) !important;
+  border: none !important;
+  transition: all 0.2s ease !important;
+  text-transform: none !important;
+  letter-spacing: 0.01em !important;
+}
+
+.wallet-adapter-button-custom:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: var(--shadow-md), var(--glow-sm) !important;
+  opacity: 0.95 !important;
+}
+
+.wallet-adapter-button-custom:active {
+  transform: translateY(0) !important;
+}
+
+/* Wallet Modal Customization */
+.wallet-adapter-modal-wrapper {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  backdrop-filter: blur(20px) !important;
+  border-radius: var(--radius-2xl) !important;
+}
+
+.wallet-adapter-modal-title {
+  color: var(--foreground) !important;
+  font-family: var(--font-heading) !important;
+}
+
+.wallet-adapter-modal-list {
+  margin: var(--space-4) 0 !important;
+}
+
+.wallet-adapter-modal-list li {
+  background: transparent !important;
+  transition: all 0.2s ease !important;
+}
+
+.wallet-adapter-modal-list li:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  transform: translateX(4px) !important;
+}
+
+.wallet-adapter-modal-overlay {
+  background: rgba(9, 11, 22, 0.8) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+/* Mobile Navigation Menu */
+.mobile-nav {
+  position: fixed;
+  top: 72px;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  backdrop-filter: blur(20px);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  transform: translateY(-100%);
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+.mobile-nav.open {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.mobile-nav-link {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  color: var(--muted-foreground);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.mobile-nav-link:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--foreground);
+  padding-left: var(--space-6);
+}

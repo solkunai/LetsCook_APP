@@ -1,0 +1,29 @@
+[package]
+name = "LetsCook"
+version = "1.0.0"
+edition = "2021"
+license = "WTFPL"
+publish = false
+
+[dependencies]
+solana-program = "=1.18.11"
+thiserror = "1.0.24"
+spl-token = {version = "4.0.0", features = ["no-entrypoint"]}
+spl-token-2022 = {version = "3.0.2", features = ["no-entrypoint"]}
+arrayref = "0.3.6"
+borsh = "=1.4.0"
+spl-associated-token-account = {version = "3.0.2", features = ["no-entrypoint"]}
+proc-macro-crate = "=3.1.0"
+toml_edit = "^0.21"
+spl-discriminator = "0.2.2"
+spl-type-length-value = "0.4.3"
+spl-tlv-account-resolution = "0.6.3"
+spl-pod = "0.2.2"
+spl-token-metadata-interface = { version = "0.3.3"}
+mpl-core = "0.7.1"
+shank = "0.4.2"
+orao-solana-vrf = { version = "0.4.0", default-features = false, features = ["cpi"] }
+sha2 = "0.10.2"
+
+[lib]
+crate-type = ["cdylib", "lib"]
