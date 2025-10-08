@@ -41,9 +41,27 @@ jobs:
     - name: Install latest Solana CLI
       run: |
         echo "Fetching latest Solana release..."
-        LATEST_TAG=$(curl -s https://api.github.com/repos/solana-labs/solana/releases/latest | jq -r .tag_name)
+        # Try multiple methods to get the latest version
+        LATEST_TAG=$(curl -s https://api.github.com/repos/solana-labs/solana/releases/latest | jq -r .tag_name) || LATEST_TAG="v1.18.11"
         echo "Installing Solana $LATEST_TAG..."
-        sh -c "$(curl -sSfL https://release.solana.com/${LATEST_TAG}/install)"
+        
+        # Retry installation with fallback
+        for i in {1..3}; do
+          echo "Installation attempt $i..."
+          if sh -c "$(curl -sSfL https://release.solana.com/${LATEST_TAG}/install)"; then
+            echo "✅ Solana CLI installed successfully"
+            break
+          else
+            echo "❌ Attempt $i failed, trying fallback..."
+            if [ $i -eq 3 ]; then
+              echo "Using GitHub mirror as final fallback..."
+              curl -sSfL https://raw.githubusercontent.com/solana-labs/solana/${LATEST_TAG}/install -o solana-install.sh
+              sh solana-install.sh
+            fi
+            sleep 5
+          fi
+        done
+        
         echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
         export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
         echo "Solana version:"
