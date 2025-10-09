@@ -173,13 +173,13 @@ jobs:
     - name: Build program
       run: |
         cd Backend
-        anchor build --verbose
+        anchor build -- --verbose
 
     - name: Deploy program
       run: |
         cd Backend
         for i in {1..3}; do
-          anchor deploy --verbose && break
+          anchor deploy -- --verbose && break
           echo "Retrying deploy..."
           sleep 5
         done
