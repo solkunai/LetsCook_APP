@@ -11,6 +11,14 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 // Network configuration
 const network = WalletAdapterNetwork.Devnet;
 
+// Use Helius RPC - HARDCODED API KEY FOR TESTING
+const HELIUS_API_KEY = '90f9fe0f-400f-4368-bc82-26d2a91b1da6'; // Hardcoded for testing
+const HELIUS_NETWORK = 'devnet';
+
+const getRpcEndpoint = () => {
+  return `https://rpc.helius.xyz/?api-key=${HELIUS_API_KEY}`;
+};
+
 // Custom hook for wallet functionality
 export function useWalletConnection() {
   const { publicKey, connected, connecting, connect, disconnect, wallet } = useWallet();
@@ -38,8 +46,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [network]
   );
 
-  // Configure connection
-  const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+  // Configure connection - use Helius RPC if available
+  const endpoint = useMemo(() => getRpcEndpoint(), []);
 
   return (
     <ConnectionProvider endpoint={endpoint}>

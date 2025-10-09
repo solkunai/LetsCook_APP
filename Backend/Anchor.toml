@@ -3,10 +3,10 @@ seeds = false
 skip-lint = false
 
 [programs.devnet]
-lets_cook = "Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU"
+lets_cook = "9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap"
 
 [programs.mainnet]
-lets_cook = "Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU"
+lets_cook = "9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap"
 
 [registry]
 url = "https://api.apr.dev"

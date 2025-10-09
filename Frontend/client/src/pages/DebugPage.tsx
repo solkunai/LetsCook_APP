@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { debugProgramService } from '@/lib/debugProgram';
+import { SolanaProgramService } from '@/lib/solanaProgram';
 
 export default function DebugPage() {
   const { connected, publicKey, wallet, sendTransaction } = useWallet();
@@ -282,6 +283,46 @@ export default function DebugPage() {
     setTesting(false);
   };
 
+  const testSimpleLaunch = async () => {
+    if (!connected || !wallet || !publicKey) {
+      addResult('❌ Please connect your wallet first');
+      return;
+    }
+
+    setTesting(true);
+    addResult('🚀 Testing simple launch functionality...');
+    
+    try {
+      const programService = new SolanaProgramService();
+      
+      // Create a proper wallet object with publicKey
+      const walletObject = {
+        ...wallet,
+        publicKey: publicKey
+      };
+      
+      const launchData = {
+        name: 'Debug Test Token',
+        symbol: 'DEBUG',
+        description: 'A test token for debugging launch functionality',
+        totalSupply: 1000000,
+        decimals: 9,
+        launchType: 'instant' as const,
+        programId: 'Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU',
+        walletAddress: publicKey.toString(),
+        initialPrice: 0.01,
+        liquidityAmount: 1,
+      };
+      
+      const signature = await programService.createInstantLaunch(walletObject, launchData);
+      addResult(`✅ Simple launch test successful: ${signature}`);
+    } catch (error) {
+      addResult(`❌ Simple launch test failed: ${error}`);
+    }
+    
+    setTesting(false);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 pt-24">
       <div className="container mx-auto px-4 py-8">
@@ -291,7 +332,7 @@ export default function DebugPage() {
           </h1>
           
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-8">
-            <h2 className="text-2xl font-semibold text-white mb-6">Wallet Status</h2>
+            <h2 className="text-2xl font-semibold text-white mb-6">System Status</h2>
             <div className="space-y-2">
               <p className="text-white">
                 <span className="font-semibold">Connected:</span> {connected ? '✅ Yes' : '❌ No'}
@@ -301,6 +342,12 @@ export default function DebugPage() {
               </p>
               <p className="text-white">
                 <span className="font-semibold">Wallet:</span> {wallet?.adapter?.name || 'Not available'}
+              </p>
+              <p className="text-white">
+                <span className="font-semibold">Program ID:</span> Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU
+              </p>
+              <p className="text-white">
+                <span className="font-semibold">Network:</span> Devnet
               </p>
             </div>
           </div>
@@ -386,6 +433,14 @@ export default function DebugPage() {
                 className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
               >
                 🔍 Find Program Data Account
+              </button>
+              
+              <button
+                onClick={testSimpleLaunch}
+                disabled={testing || !connected}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+              >
+                🚀 Test Simple Launch
               </button>
             </div>
           </div>

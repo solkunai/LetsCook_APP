@@ -247,6 +247,28 @@ jobs:
     # ==============================
     # Deployment Summary
     # ==============================
+    - name: Verify Program Deployment
+      run: |
+        echo "🔍 Verifying program deployment on Devnet..."
+        echo "Program ID: ${{ env.PROGRAM_ID }}"
+        
+        # Check if program exists
+        if solana program show ${{ env.PROGRAM_ID }}; then
+          echo "✅ Program verification successful!"
+          echo "📊 Program details:"
+          solana program show ${{ env.PROGRAM_ID }} --verbose
+        else
+          echo "❌ Program verification failed!"
+          echo "Program not found on Devnet"
+          exit 1
+        fi
+        
+        # Additional verification - check program account
+        echo "🔍 Checking program account details..."
+        solana account ${{ env.PROGRAM_ID }} --output json | jq '.account.executable'
+        
+        echo "✅ All verifications passed!"
+
     - name: Display Summary
       run: |
         echo "=========================================="

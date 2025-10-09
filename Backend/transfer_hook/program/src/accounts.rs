@@ -18,7 +18,7 @@ pub mod lets_cook_pda {
 }
 pub mod lets_cook_program {
     use super::*;
-    declare_id!("Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU");
+    declare_id!("9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap");
 }
 
 pub mod wrapped_sol_mint_account {

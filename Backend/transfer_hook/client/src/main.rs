@@ -50,7 +50,7 @@ pub fn create(key_file: &String) -> Result<()> {
     // (3) Create RPC client to be used to talk to Solana cluster
     let connection = RpcClient::new(URL);
 
-    let lets_cook = Pubkey::from_str("Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU").unwrap();
+    let lets_cook = Pubkey::from_str("9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap").unwrap();
     let hook_program = Pubkey::from_str(HOOK_PUBKEY).unwrap();
     let wrapped_sol = Pubkey::from_str("So11111111111111111111111111111111111111112").unwrap();
 
@@ -124,7 +124,7 @@ pub fn transfer(key_file: &String) -> Result<()> {
     let connection = RpcClient::new(URL);
 
     let hook_program = Pubkey::from_str(HOOK_PUBKEY).unwrap();
-    let lets_cook = Pubkey::from_str("Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU").unwrap();
+    let lets_cook = Pubkey::from_str("9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap").unwrap();
 
     let mint_address = Pubkey::from_str("E4aURieH58RCnEVRtYnbay7Leorh7nSYgHdsnprERqPE").unwrap();
     let quote_mint = Pubkey::from_str("So11111111111111111111111111111111111111112").unwrap();

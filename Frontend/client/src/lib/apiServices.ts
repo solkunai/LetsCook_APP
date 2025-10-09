@@ -6,10 +6,10 @@ import { getBackendIntegration } from './backendIntegration';
 
 // Program IDs - Update these with your actual deployed program IDs
 export const PROGRAM_IDS = {
-  MAIN_PROGRAM: new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || '11111111111111111111111111111112'),
-  CITIZENS_PROGRAM: new PublicKey(import.meta.env.VITE_CITIZENS_PROGRAM_ID || '11111111111111111111111111111113'),
-  LISTINGS_PROGRAM: new PublicKey(import.meta.env.VITE_LISTINGS_PROGRAM_ID || '11111111111111111111111111111114'),
-  TRANSFER_HOOK_PROGRAM: new PublicKey(import.meta.env.VITE_TRANSFER_HOOK_PROGRAM_ID || '11111111111111111111111111111115'),
+  MAIN_PROGRAM: new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || 'Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU'),
+  CITIZENS_PROGRAM: new PublicKey(import.meta.env.VITE_CITIZENS_PROGRAM_ID || 'Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU'),
+  LISTINGS_PROGRAM: new PublicKey(import.meta.env.VITE_LISTINGS_PROGRAM_ID || 'Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU'),
+  TRANSFER_HOOK_PROGRAM: new PublicKey(import.meta.env.VITE_TRANSFER_HOOK_PROGRAM_ID || 'Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU'),
   RAYDIUM_AMM_PROGRAM: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'),
   RAYDIUM_LIQUIDITY_PROGRAM: new PublicKey('27haf8L6oxUeXrHrgEgsexjSY5hbVUWEmvv9Nyxg8vQv'),
 };

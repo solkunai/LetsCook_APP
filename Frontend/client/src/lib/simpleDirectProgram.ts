@@ -21,8 +21,8 @@ export class SimpleDirectProgramService {
     this.connection = getSimpleConnection();
   }
 
-  // Simple launch creation that works with our basic program
-  async createSimpleLaunch(
+  // Instant launch creation
+  async createInstantLaunch(
     wallet: any,
     launchData: {
       name: string;
@@ -30,10 +30,55 @@ export class SimpleDirectProgramService {
       description: string;
       totalSupply: number;
       decimals: number;
+      initialPrice?: number;
+      liquidityAmount?: number;
+      launchType: 'instant';
+      programId: string;
+      walletAddress: string;
+    }
+  ): Promise<string> {
+    return this.createLaunch(wallet, { ...launchData, launchType: 'instant' });
+  }
+
+  // Raffle launch creation
+  async createRaffleLaunch(
+    wallet: any,
+    launchData: {
+      name: string;
+      symbol: string;
+      description: string;
+      totalSupply: number;
+      decimals: number;
+      ticketPrice?: number;
+      maxTickets?: number;
+      raffleDuration?: number;
+      winnerCount?: number;
+      launchType: 'raffle';
+      programId: string;
+      walletAddress: string;
+    }
+  ): Promise<string> {
+    return this.createLaunch(wallet, { ...launchData, launchType: 'raffle' });
+  }
+
+  // Generic launch creation that works with our basic program
+  async createLaunch(
+    wallet: any,
+    launchData: {
+      name: string;
+      symbol: string;
+      description: string;
+      totalSupply: number;
+      decimals: number;
+      launchType: 'instant' | 'raffle';
+      programId: string;
+      walletAddress: string;
+      [key: string]: any; // Allow additional properties
     }
   ): Promise<string> {
     try {
       console.log('🚀 SimpleDirectProgram: Creating simple launch with data:', launchData);
+      console.log('🎯 SimpleDirectProgram: Launch type:', launchData.launchType || 'default');
       console.log('🔍 SimpleDirectProgram: Wallet object:', wallet);
       console.log('🔍 SimpleDirectProgram: Wallet publicKey:', wallet?.publicKey);
       console.log('🔍 SimpleDirectProgram: Wallet adapter:', wallet?.adapter);
@@ -81,10 +126,10 @@ export class SimpleDirectProgramService {
       console.log('🔍 SimpleDirectProgram: Sending transaction...');
       let signature;
 
-      if (wallet.sendTransaction) {
-        // For wallet-adapter-react (most setups)
-        console.log('🔍 SimpleDirectProgram: Using wallet.sendTransaction...');
-        signature = await wallet.sendTransaction(transaction, this.connection);
+      if (wallet.adapter?.sendTransaction) {
+        // For wallet-adapter-react (most setups) - call on adapter to maintain this context
+        console.log('🔍 SimpleDirectProgram: Using wallet.adapter.sendTransaction...');
+        signature = await wallet.adapter.sendTransaction(transaction, this.connection);
       } else if (wallet.signTransaction && wallet.publicKey) {
         // For Phantom / Solflare direct API
         console.log('🔍 SimpleDirectProgram: Using wallet.signTransaction...');
@@ -106,21 +151,29 @@ export class SimpleDirectProgramService {
     }
   }
 
-  // Serialize launch data for our simple program using Uint8Array instead of Buffer
+  // Serialize launch data for our simple program using Buffer
   private serializeLaunchData(data: {
     name: string;
     symbol: string;
     description: string;
     totalSupply: number;
     decimals: number;
-  }): Uint8Array {
-    // Create a simple data structure that our basic program can understand
-    const buffer = new Uint8Array(1024); // Allocate enough space
+    launchType: 'instant' | 'raffle';
+    programId: string;
+    walletAddress: string;
+    [key: string]: any;
+  }): Buffer {
+    // Create a comprehensive data structure that our program can understand
+    const buffer = new Uint8Array(2048); // Increased space for more data
     let offset = 0;
 
     // Add discriminator
     buffer.set(CREATE_LAUNCH_DISCRIMINATOR, offset);
     offset += CREATE_LAUNCH_DISCRIMINATOR.length;
+
+    // Add launch type (1 byte: 0 = instant, 1 = raffle)
+    buffer[offset] = data.launchType === 'instant' ? 0 : 1;
+    offset += 1;
 
     // Add name (32 bytes max)
     const nameBytes = new TextEncoder().encode(data.name.padEnd(32, '\0').slice(0, 32));
@@ -153,7 +206,52 @@ export class SimpleDirectProgramService {
     buffer.set(descriptionBytes, offset);
     offset += descriptionBytes.length;
 
-    return buffer.slice(0, offset);
+    // Add launch-specific data based on type
+    if (data.launchType === 'instant') {
+      // Add initial price (8 bytes, u64)
+      const initialPriceBytes = new Uint8Array(8);
+      const initialPriceView = new DataView(initialPriceBytes.buffer);
+      initialPriceView.setBigUint64(0, BigInt(Math.floor((data.initialPrice || 0) * 1e9)), true);
+      buffer.set(initialPriceBytes, offset);
+      offset += 8;
+
+      // Add liquidity amount (8 bytes, u64)
+      const liquidityBytes = new Uint8Array(8);
+      const liquidityView = new DataView(liquidityBytes.buffer);
+      liquidityView.setBigUint64(0, BigInt(Math.floor((data.liquidityAmount || 0) * 1e9)), true);
+      buffer.set(liquidityBytes, offset);
+      offset += 8;
+    } else if (data.launchType === 'raffle') {
+      // Add ticket price (8 bytes, u64)
+      const ticketPriceBytes = new Uint8Array(8);
+      const ticketPriceView = new DataView(ticketPriceBytes.buffer);
+      ticketPriceView.setBigUint64(0, BigInt(Math.floor((data.ticketPrice || 0) * 1e9)), true);
+      buffer.set(ticketPriceBytes, offset);
+      offset += 8;
+
+      // Add max tickets (4 bytes, u32)
+      const maxTicketsBytes = new Uint8Array(4);
+      const maxTicketsView = new DataView(maxTicketsBytes.buffer);
+      maxTicketsView.setUint32(0, data.maxTickets || 0, true);
+      buffer.set(maxTicketsBytes, offset);
+      offset += 4;
+
+      // Add raffle duration (4 bytes, u32)
+      const durationBytes = new Uint8Array(4);
+      const durationView = new DataView(durationBytes.buffer);
+      durationView.setUint32(0, data.raffleDuration || 0, true);
+      buffer.set(durationBytes, offset);
+      offset += 4;
+
+      // Add winner count (4 bytes, u32)
+      const winnerCountBytes = new Uint8Array(4);
+      const winnerCountView = new DataView(winnerCountBytes.buffer);
+      winnerCountView.setUint32(0, data.winnerCount || 0, true);
+      buffer.set(winnerCountBytes, offset);
+      offset += 4;
+    }
+
+    return Buffer.from(buffer.slice(0, offset));
   }
 
   // Test connection to our program
