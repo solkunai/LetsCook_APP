@@ -1,0 +1,23 @@
+name: Anchor Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Backend/program/**"
+      - "Backend/tests/**"
+      - "Backend/Anchor.toml"
+      - "Backend/Cargo.toml"
+      - "Backend/Cargo.lock"
+  workflow_dispatch:
+    inputs:
+      program:
+        description: "Program to test"
+        required: true
+        default: "lets_cook"
+
+jobs:
+  test:
+    uses: solana-developers/github-workflows/.github/workflows/test.yaml@v0.2.9
+    with:
+      program: ${{ github.event.inputs.program || 'lets_cook' }}
