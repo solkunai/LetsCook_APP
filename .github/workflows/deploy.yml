@@ -170,6 +170,19 @@ jobs:
     # ==============================
     # Build and Deploy Program
     # ==============================
+    - name: Generate new program ID
+      run: |
+        cd Backend
+        echo "🔧 Generating new program ID..."
+        solana-keygen new --no-passphrase --force -o target/deploy/lets_cook.json
+        PROGRAM_ID=$(solana-keygen pubkey target/deploy/lets_cook.json)
+        echo "New Program ID: $PROGRAM_ID"
+        echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
+        
+        # Update the Rust code with the new program ID
+        sed -i "s/declare_id!(\"[^\"]*\")/declare_id!(\"$PROGRAM_ID\")/" program/src/lib.rs
+        echo "✅ Updated lib.rs with new program ID"
+
     - name: Build program
       run: |
         cd Backend
@@ -190,7 +203,7 @@ jobs:
     - name: Extract Program ID
       run: |
         cd Backend
-        PROGRAM_ID=$(solana address -k target/deploy/counter.json)
+        PROGRAM_ID=$(solana address -k target/deploy/lets_cook.json)
         echo "Program ID: $PROGRAM_ID"
         echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
         echo "$PROGRAM_ID" > program_id.txt
@@ -199,7 +212,7 @@ jobs:
       run: |
         cd Backend
         cp Anchor.toml Anchor.toml.backup
-        sed -i "/\[programs.devnet\]/,/^\[/ s/counter = \".*\"/counter = \"${{ env.PROGRAM_ID }}\"/" Anchor.toml
+        sed -i "/\[programs.devnet\]/,/^\[/ s/lets_cook = \".*\"/lets_cook = \"${{ env.PROGRAM_ID }}\"/" Anchor.toml
         echo "✅ Updated Anchor.toml with new Program ID"
         cat Anchor.toml
 
