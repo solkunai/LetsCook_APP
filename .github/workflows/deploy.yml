@@ -55,7 +55,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y pkg-config libudev-dev libssl-dev build-essential curl jq
+        sudo apt-get install -y pkg-config libudev-dev libssl-dev build-essential curl jq bc
 
     - name: Verify base tools
       run: |
@@ -65,7 +65,7 @@ jobs:
         npm --version
 
     # ==============================
-    # Install Solana CLI (GitHub mirror)
+    # Install Solana CLI
     # ==============================
     - name: Install Solana CLI
       run: |
@@ -111,59 +111,53 @@ jobs:
     # Setup wallet from GitHub secret
     # ==============================
     - name: Create wallet from GitHub secret
+      shell: bash
       run: |
         mkdir -p ~/.config/solana
-        
-        # Check if secret exists and is not empty
+        WALLET_PATH=$HOME/.config/solana/id.json
+
+        echo "🔑 Setting up wallet..."
         if [ -z "${{ secrets.SOLANA_WALLET_KEY }}" ]; then
-          echo "❌ SOLANA_WALLET_KEY secret is not set or empty"
-          echo "🔧 Generating new keypair..."
-          solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
-          echo "✅ Generated new keypair"
-        else
-          echo "🔑 Creating wallet from GitHub secret..."
-          # Try to decode and validate the keypair
-          if echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > ~/.config/solana/id.json 2>/dev/null; then
-            chmod 600 ~/.config/solana/id.json
-            
-            # Validate the keypair file
-            if solana-keygen verify ~/.config/solana/id.json 2>/dev/null; then
-              echo "✅ Successfully loaded wallet from secret"
-            else
-              echo "❌ Invalid keypair format in secret"
-              echo "🔧 Generating new keypair..."
-              solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
-              echo "✅ Generated new keypair"
-            fi
-          else
-            echo "❌ Failed to decode base64 secret"
-            echo "🔧 Generating new keypair..."
-            solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
-            echo "✅ Generated new keypair"
-          fi
-        fi
-        
-        echo "Wallet Address:"
-        solana address
-        
-        # If we generated a new keypair, display it for updating the secret
-        if [ -z "${{ secrets.SOLANA_WALLET_KEY }}" ] || ! echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > /dev/null 2>&1; then
-          echo ""
-          echo "🔑 NEW KEYPAIR GENERATED - Update your GitHub secret:"
-          echo "=========================================="
-          echo "SOLANA_WALLET_KEY=$(base64 -w 0 ~/.config/solana/id.json)"
-          echo "=========================================="
-          echo "Add this as a repository secret named 'SOLANA_WALLET_KEY'"
-          echo ""
+          echo "❌ No secret found. Generating new keypair..."
+          solana-keygen new --no-bip39-passphrase --silent --outfile "$WALLET_PATH"
+          echo "✅ New keypair generated."
+          echo "Base64 (for updating secret):"
+          base64 -w 0 "$WALLET_PATH"
+          exit 0
         fi
 
+        # Decode Base64 safely (strip newlines)
+        echo "${{ secrets.SOLANA_WALLET_KEY }}" | tr -d '\n' | base64 --decode > "$WALLET_PATH" || {
+          echo "❌ Failed to decode Base64 secret."
+          exit 1
+        }
+
+        chmod 600 "$WALLET_PATH"
+
+        # Verify the file is a valid Solana keypair
+        if [ "$(jq 'length' "$WALLET_PATH")" -eq 64 ]; then
+          echo "✅ Valid Solana keypair loaded from secret."
+        else
+          echo "❌ Invalid keypair format. File does not contain 64 integers."
+          echo "🔧 Regenerating keypair..."
+          solana-keygen new --no-bip39-passphrase --silent --outfile "$WALLET_PATH"
+          echo "✅ New keypair generated."
+          echo "Base64 (for updating secret):"
+          base64 -w 0 "$WALLET_PATH"
+        fi
+
+        echo "Wallet Address:"
+        solana address
+
+    # ==============================
+    # Check wallet balance and airdrop if needed
+    # ==============================
     - name: Check wallet balance and airdrop if needed
       run: |
         echo "🔍 Checking wallet balance..."
         BALANCE=$(solana balance | awk '{print $1}')
         echo "Current balance: $BALANCE SOL"
         
-        # Check if balance is valid number
         if ! echo "$BALANCE" | grep -E '^[0-9]+\.?[0-9]*$' > /dev/null; then
           echo "❌ Failed to get valid balance, requesting airdrop..."
           BALANCE="0"
