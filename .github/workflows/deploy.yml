@@ -108,66 +108,34 @@ jobs:
         solana config set --commitment confirmed
 
     # ==============================
-    # Setup wallet from GitHub secret
+    # Setup Solana wallet
     # ==============================
-    - name: Create wallet from GitHub secret
+    - name: Setup Solana wallet
       run: |
         mkdir -p ~/.config/solana
         
-        # Remove any existing keypair file to avoid conflicts
-        rm -f ~/.config/solana/id.json
-        
         # Check if secret exists and is not empty
-        if [ -z "${{ secrets.SOLANA_WALLET_KEY }}" ]; then
-          echo "❌ SOLANA_WALLET_KEY secret is not set or empty"
+        if [ -z "${{ secrets.SOLANA_KEYPAIR }}" ]; then
+          echo "❌ SOLANA_KEYPAIR secret is not set or empty"
           echo "🔧 Generating new keypair..."
-          solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
+          solana-keygen new --no-passphrase --force -o ~/.config/solana/id.json
           echo "✅ Generated new keypair"
+          echo ""
+          echo "🔑 NEW KEYPAIR GENERATED - Update your GitHub secret:"
+          echo "=========================================="
+          echo "SOLANA_KEYPAIR=$(cat ~/.config/solana/id.json)"
+          echo "=========================================="
+          echo "Add this as a repository secret named 'SOLANA_KEYPAIR'"
+          echo ""
         else
           echo "🔑 Creating wallet from GitHub secret..."
-          # Try to decode the base64 secret
-          if echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > ~/.config/solana/id.json 2>/dev/null; then
-            chmod 600 ~/.config/solana/id.json
-            
-            # Check if the file contains valid JSON array with 64 bytes
-            if [ -f ~/.config/solana/id.json ]; then
-              # Try to parse as JSON and check if it's an array of 64 numbers
-              BYTE_COUNT=$(cat ~/.config/solana/id.json | jq 'length' 2>/dev/null || echo "0")
-              if [ "$BYTE_COUNT" = "64" ]; then
-                echo "✅ Successfully loaded wallet from secret (64 bytes)"
-              else
-                echo "❌ Invalid keypair format. Expected 64 bytes, got $BYTE_COUNT"
-                echo "🔧 Generating new keypair..."
-                solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
-                echo "✅ Generated new keypair"
-              fi
-            else
-              echo "❌ Failed to create keypair file"
-              echo "🔧 Generating new keypair..."
-              solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
-              echo "✅ Generated new keypair"
-            fi
-          else
-            echo "❌ Failed to decode base64 secret"
-            echo "🔧 Generating new keypair..."
-            solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
-            echo "✅ Generated new keypair"
-          fi
+          echo "${{ secrets.SOLANA_KEYPAIR }}" > ~/.config/solana/id.json
+          chmod 600 ~/.config/solana/id.json
+          echo "✅ Successfully loaded wallet from secret"
         fi
         
         echo "Wallet Address:"
         solana address
-        
-        # If we generated a new keypair, display it for updating the secret
-        if [ -z "${{ secrets.SOLANA_WALLET_KEY }}" ] || ! echo "${{ secrets.SOLANA_WALLET_KEY }}" | base64 -d > /dev/null 2>&1; then
-          echo ""
-          echo "🔑 NEW KEYPAIR GENERATED - Update your GitHub secret:"
-          echo "=========================================="
-          echo "SOLANA_WALLET_KEY=$(base64 -w 0 ~/.config/solana/id.json)"
-          echo "=========================================="
-          echo "Add this as a repository secret named 'SOLANA_WALLET_KEY'"
-          echo ""
-        fi
 
     - name: Check wallet balance and airdrop if needed
       run: |
