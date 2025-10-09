@@ -1,282 +1,32 @@
 name: Deploy Solana Program to Devnet
 
 on:
+  workflow_dispatch:
+    inputs:
+      priority_fee:
+        description: "Priority fee for transactions"
+        required: true
+        default: "300000"
+        type: string
   push:
     branches: [ main, master ]
-  workflow_dispatch:
+    paths:
+      - 'Backend/program/**'
+      - 'Backend/Anchor.toml'
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    # ==============================
-    # Cache Rust & Cargo dependencies
-    # ==============================
-    - name: Cache Rust dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
-    # ==============================
-    # Cache Solana & Anchor binaries
-    # ==============================
-    - name: Cache Solana & Anchor
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.local/bin
-          ~/.config/solana
-        key: ${{ runner.os }}-solana-anchor-${{ hashFiles('**/Anchor.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-solana-anchor-
-
-    # ==============================
-    # Install base dependencies
-    # ==============================
-    - name: Setup Node.js and Rust
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y pkg-config libudev-dev libssl-dev build-essential curl jq
-
-    - name: Verify base tools
-      run: |
-        rustc --version
-        cargo --version
-        node --version
-        npm --version
-
-    # ==============================
-    # Install Solana CLI (GitHub mirror)
-    # ==============================
-    - name: Install Solana CLI
-      run: |
-        if ! command -v solana &> /dev/null; then
-          echo "=== Installing Solana CLI via GitHub mirror ==="
-          SOLANA_VERSION="v1.18.20"
-          mkdir -p ~/.local/bin
-          curl -L "https://github.com/solana-labs/solana/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" -o solana.tar.bz2
-          tar -xjf solana.tar.bz2
-          mv solana-release/bin/* ~/.local/bin/
-        else
-          echo "✅ Solana already cached"
-        fi
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-        export PATH="$HOME/.local/bin:$PATH"
-        solana --version
-
-    # ==============================
-    # Install Anchor CLI
-    # ==============================
-    - name: Install Anchor CLI
-      run: |
-        if ! command -v anchor &> /dev/null; then
-          echo "=== Installing Anchor CLI ==="
-          ANCHOR_VERSION="0.31.1"
-          source $HOME/.cargo/env
-          rustup default stable
-          cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --force
-        else
-          echo "✅ Anchor already cached"
-        fi
-        anchor --version
-
-    # ==============================
-    # Configure Solana for Devnet
-    # ==============================
-    - name: Configure Solana CLI
-      run: |
-        solana config set --url https://api.devnet.solana.com
-        solana config set --commitment confirmed
-
-    # ==============================
-    # Setup Solana wallet
-    # ==============================
-    - name: Setup Solana wallet
-      run: |
-        mkdir -p ~/.config/solana
-        
-        # Check if secret exists and is not empty
-        if [ -z "${{ secrets.SOLANA_KEYPAIR }}" ]; then
-          echo "❌ SOLANA_KEYPAIR secret is not set or empty"
-          echo "🔧 Generating new keypair..."
-          solana-keygen new --no-passphrase --force -o ~/.config/solana/id.json
-          echo "✅ Generated new keypair"
-          echo ""
-          echo "🔑 NEW KEYPAIR GENERATED - Update your GitHub secret:"
-          echo "=========================================="
-          echo "SOLANA_KEYPAIR=$(cat ~/.config/solana/id.json)"
-          echo "=========================================="
-          echo "Add this as a repository secret named 'SOLANA_KEYPAIR'"
-          echo ""
-        else
-          echo "🔑 Creating wallet from GitHub secret..."
-          echo "${{ secrets.SOLANA_KEYPAIR }}" > ~/.config/solana/id.json
-          chmod 600 ~/.config/solana/id.json
-          echo "✅ Successfully loaded wallet from secret"
-        fi
-        
-        echo "Wallet Address:"
-        solana address
-
-    - name: Check wallet balance and airdrop if needed
-      run: |
-        echo "🔍 Checking wallet balance..."
-        BALANCE=$(solana balance | awk '{print $1}')
-        echo "Current balance: $BALANCE SOL"
-        
-        # Check if balance is valid number
-        if ! echo "$BALANCE" | grep -E '^[0-9]+\.?[0-9]*$' > /dev/null; then
-          echo "❌ Failed to get valid balance, requesting airdrop..."
-          BALANCE="0"
-        fi
-        
-        if (( $(echo "$BALANCE < 1.0" | bc -l) )); then
-          echo "💰 Balance too low, requesting airdrop..."
-          for i in {1..3}; do
-            echo "Attempt $i/3..."
-            if solana airdrop 2; then
-              echo "✅ Airdrop successful"
-              break
-            else
-              echo "❌ Airdrop failed, retrying in 5 seconds..."
-              sleep 5
-            fi
-          done
-          echo "Final balance:"
-          solana balance
-        else
-          echo "✅ Sufficient balance for deployment"
-        fi
-
-    # ==============================
-    # Build and Deploy Program
-    # ==============================
-    - name: Generate new program ID
-      run: |
-        cd Backend
-        echo "🔧 Generating new program ID..."
-        solana-keygen new --no-passphrase --force -o target/deploy/lets_cook.json
-        PROGRAM_ID=$(solana-keygen pubkey target/deploy/lets_cook.json)
-        echo "New Program ID: $PROGRAM_ID"
-        echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
-        
-        # Update the Rust code with the new program ID
-        sed -i "s/declare_id!(\"[^\"]*\")/declare_id!(\"$PROGRAM_ID\")/" program/src/lib.rs
-        echo "✅ Updated lib.rs with new program ID"
-
-    - name: Build program
-      run: |
-        cd Backend
-        anchor build -- --verbose
-
-    - name: Deploy program
-      run: |
-        cd Backend
-        for i in {1..3}; do
-          anchor deploy -- --verbose && break
-          echo "Retrying deploy..."
-          sleep 5
-        done
-
-    # ==============================
-    # Extract and Update Program ID
-    # ==============================
-    - name: Extract Program ID
-      run: |
-        cd Backend
-        PROGRAM_ID=$(solana address -k target/deploy/lets_cook.json)
-        echo "Program ID: $PROGRAM_ID"
-        echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
-        echo "$PROGRAM_ID" > program_id.txt
-
-    - name: Update Anchor.toml with Program ID
-      run: |
-        cd Backend
-        cp Anchor.toml Anchor.toml.backup
-        sed -i "/\[programs.devnet\]/,/^\[/ s/lets_cook = \".*\"/lets_cook = \"${{ env.PROGRAM_ID }}\"/" Anchor.toml
-        echo "✅ Updated Anchor.toml with new Program ID"
-        cat Anchor.toml
-
-    # ==============================
-    # Upload Artifacts & Commit
-    # ==============================
-    - name: Upload Program ID
-      uses: actions/upload-artifact@v4
-      with:
-        name: program-id
-        path: Backend/program_id.txt
-
-    - name: Upload updated Anchor.toml
-      uses: actions/upload-artifact@v4
-      with:
-        name: anchor-config
-        path: Backend/Anchor.toml
-
-    - name: Commit updated Anchor.toml
-      run: |
-        cd Backend
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add Anchor.toml
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "Update Program ID to ${{ env.PROGRAM_ID }} [skip ci]"
-          git push
-        fi
-
-    # ==============================
-    # Deployment Summary
-    # ==============================
-    - name: Verify Program Deployment
-      run: |
-        echo "🔍 Verifying program deployment on Devnet..."
-        echo "Program ID: ${{ env.PROGRAM_ID }}"
-        
-        # Check if program exists
-        if solana program show ${{ env.PROGRAM_ID }}; then
-          echo "✅ Program verification successful!"
-          echo "📊 Program details:"
-          solana program show ${{ env.PROGRAM_ID }} --verbose
-        else
-          echo "❌ Program verification failed!"
-          echo "Program not found on Devnet"
-          exit 1
-        fi
-        
-        # Additional verification - check program account
-        echo "🔍 Checking program account details..."
-        solana account ${{ env.PROGRAM_ID }} --output json | jq '.account.executable'
-        
-        echo "✅ All verifications passed!"
-
-    - name: Display Summary
-      run: |
-        echo "=========================================="
-        echo "🎉 DEPLOYMENT SUCCESSFUL 🎉"
-        echo "=========================================="
-        echo "Program ID: ${{ env.PROGRAM_ID }}"
-        echo "Wallet Address: $(solana address)"
-        echo "Network: Devnet"
-        solana --version
-        anchor --version
-        echo "=========================================="
+  build:
+    uses: solana-developers/github-workflows/.github/workflows/reusable-build.yaml@v0.2.9
+    with:
+      program: "lets_cook"
+      program-id: "YOUR_PROGRAM_ID"
+      network: "devnet"
+      deploy: true
+      upload_idl: true
+      verify: false
+      use-squads: false
+      priority-fee: ${{ github.event.inputs.priority_fee || '300000' }}
+    secrets:
+      DEVNET_SOLANA_DEPLOY_URL: ${{ secrets.DEVNET_SOLANA_DEPLOY_URL }}
+      DEVNET_DEPLOYER_KEYPAIR: ${{ secrets.DEVNET_DEPLOYER_KEYPAIR }}
+      PROGRAM_ADDRESS_KEYPAIR: ${{ secrets.PROGRAM_ADDRESS_KEYPAIR }}
