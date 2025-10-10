@@ -22,27 +22,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Install Solana CLI (Agave)
-        run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v3.0.6/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-          solana --version
-          solana-keygen --version
-          
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           components: rustfmt, clippy
           
+      - name: Install Solana CLI
+        run: |
+          if ! command -v solana &> /dev/null; then
+            echo "=== Installing Solana CLI via GitHub mirror ==="
+            SOLANA_VERSION="v1.18.20"
+            mkdir -p ~/.local/bin
+            curl -L "https://github.com/solana-labs/solana/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" -o solana.tar.bz2
+            tar -xjf solana.tar.bz2
+            mv solana-release/bin/* ~/.local/bin/
+          else
+            echo "✅ Solana already cached"
+          fi
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+          solana --version
+          solana-keygen --version
+          
       - name: Install Anchor CLI
         run: |
-          npm install -g @coral-xyz/anchor-cli@0.31.2
+          if ! command -v anchor &> /dev/null; then
+            echo "=== Installing Anchor CLI ==="
+            ANCHOR_VERSION="0.31.1"
+            source $HOME/.cargo/env
+            rustup default stable
+            cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --force
+          else
+            echo "✅ Anchor already cached"
+          fi
           anchor --version
           
       - name: Setup Solana config
