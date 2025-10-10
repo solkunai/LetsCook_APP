@@ -15,18 +15,60 @@ on:
       - 'Backend/Anchor.toml'
 
 jobs:
-  build:
-    uses: solana-developers/github-workflows/.github/workflows/reusable-build.yaml@v0.2.9
-    with:
-      program: "lets_cook"
-      program-id: "YOUR_PROGRAM_ID"
-      network: "devnet"
-      deploy: true
-      upload_idl: true
-      verify: false
-      use-squads: false
-      priority-fee: ${{ github.event.inputs.priority_fee || '300000' }}
-    secrets:
-      DEVNET_SOLANA_DEPLOY_URL: ${{ secrets.DEVNET_SOLANA_DEPLOY_URL }}
-      DEVNET_DEPLOYER_KEYPAIR: ${{ secrets.DEVNET_DEPLOYER_KEYPAIR }}
-      PROGRAM_ADDRESS_KEYPAIR: ${{ secrets.PROGRAM_ADDRESS_KEYPAIR }}
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install Solana CLI (Agave)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.0.6/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          solana --version
+          solana-keygen --version
+          
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          
+      - name: Install Anchor CLI
+        run: |
+          npm install -g @coral-xyz/anchor-cli@0.31.2
+          anchor --version
+          
+      - name: Setup Solana config
+        run: |
+          solana config set --url devnet
+          echo "${{ secrets.DEVNET_DEPLOYER_KEYPAIR }}" | base64 -d > deployer-keypair.json
+          solana config set --keypair deployer-keypair.json
+          
+      - name: Build program
+        run: |
+          cd Backend
+          anchor build
+          
+      - name: Deploy program
+        run: |
+          cd Backend
+          anchor deploy --provider.cluster devnet
+          
+      - name: Get Program ID
+        run: |
+          cd Backend
+          PROGRAM_ID=$(solana address -k target/deploy/lets_cook-keypair.json)
+          echo "Program ID: $PROGRAM_ID"
+          echo "PROGRAM_ID=$PROGRAM_ID" >> $GITHUB_ENV
+          
+      - name: Upload IDL
+        run: |
+          cd Backend
+          anchor idl init $PROGRAM_ID --filepath target/idl/lets_cook.json --provider.cluster devnet
