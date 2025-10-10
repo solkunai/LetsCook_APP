@@ -3,16 +3,16 @@ seeds = false
 skip-lint = false
 
 [programs.devnet]
-lets_cook = "9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap"
+lets_cook = "Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU"
 
 [programs.mainnet]
-lets_cook = "9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap"
+lets_cook = "Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

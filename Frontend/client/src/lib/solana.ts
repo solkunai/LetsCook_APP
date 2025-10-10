@@ -1,7 +1,7 @@
 import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js';
 
-// Program ID from your Rust program
-export const PROGRAM_ID = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || 'Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU');
+// Program ID from your Rust program - HARDCODED FOR TESTING
+export const PROGRAM_ID = new PublicKey('Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU');
 
 // Network configuration
 export const NETWORK = {

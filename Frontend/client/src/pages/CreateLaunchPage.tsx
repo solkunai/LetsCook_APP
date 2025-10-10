@@ -268,10 +268,30 @@ export default function EnhancedLaunchPage() {
     } catch (error) {
       console.error('❌ Error creating launch:', error);
       
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      let errorMessage = "An unknown error occurred.";
+      let errorTitle = "Launch Creation Failed";
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        
+        // Provide more specific error messages
+        if (error.message.includes('Failed to serialize or deserialize account data')) {
+          errorTitle = "Program Error";
+          errorMessage = "The program couldn't process the instruction data. This usually means the instruction format or accounts don't match what the program expects.";
+        } else if (error.message.includes('Insufficient funds')) {
+          errorTitle = "Insufficient Funds";
+          errorMessage = "You don't have enough SOL to pay for the transaction fees.";
+        } else if (error.message.includes('User rejected')) {
+          errorTitle = "Transaction Cancelled";
+          errorMessage = "You cancelled the transaction in your wallet.";
+        } else if (error.message.includes('Transaction failed')) {
+          errorTitle = "Transaction Failed";
+          errorMessage = `Transaction failed: ${error.message}`;
+        }
+      }
       
       toast({
-        title: "Launch Creation Failed",
+        title: errorTitle,
         description: errorMessage,
         variant: "destructive",
       });

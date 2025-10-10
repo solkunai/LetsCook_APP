@@ -1,11 +1,21 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { fileURLToPath } from "url";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-export default defineConfig(({ mode }) => {
-  // Load environment variables from devnet.env
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig(async ({ mode }) => {
+  // Load environment variables from .env files
   const env = loadEnv(mode, process.cwd(), '');
+  
+  // Debug: Log environment variables
+  console.log('🔍 Vite config loading env vars:', {
+    mode,
+    VITE_MAIN_PROGRAM_ID: env.VITE_MAIN_PROGRAM_ID,
+    allViteVars: Object.keys(env).filter(key => key.startsWith('VITE_'))
+  });
   
   return {
   plugins: [
@@ -25,21 +35,22 @@ export default defineConfig(({ mode }) => {
   ],
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "shared"),
-      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      "@": path.resolve(__dirname, "client", "src"),
+      "@shared": path.resolve(__dirname, "shared"),
+      "@assets": path.resolve(__dirname, "attached_assets"),
       buffer: 'buffer',
     },
   },
   define: {
     global: 'globalThis',
+    'process.env': env // Ensure process.env is defined for Vite
   },
   optimizeDeps: {
     include: ['buffer'],
   },
-  root: path.resolve(import.meta.dirname, "client"),
+  root: path.resolve(__dirname, "client"),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
   },
   server: {
