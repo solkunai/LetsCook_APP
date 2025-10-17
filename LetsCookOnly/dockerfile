@@ -1,0 +1,32 @@
+# =============================
+# Solana + Anchor Docker Image
+# =============================
+
+FROM rust:1.77
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    libssl-dev pkg-config build-essential curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Solana CLI
+RUN sh -c "$(curl -sSfL https://release.solana.com/v1.18.26/install)" && \
+    export PATH="/root/.local/share/solana/install/active_release/bin:$PATH"
+
+# Install Anchor CLI
+RUN cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked
+
+# Set working directory
+WORKDIR /app
+
+# Copy the project
+COPY . .
+
+# Ensure Solana path
+ENV PATH="/root/.local/share/solana/install/active_release/bin:$PATH"
+
+# Verify installs
+RUN solana --version && anchor --version
+
+# Build the program
+RUN anchor build

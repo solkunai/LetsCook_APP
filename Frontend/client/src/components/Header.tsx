@@ -2,6 +2,7 @@ import React from 'react';
 import { useLocation } from 'wouter';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { Button } from '@/components/ui/button';
+import { motion } from 'framer-motion';
 import { 
   Menu, 
   X,
@@ -12,7 +13,7 @@ import {
   DollarSign,
   BarChart3
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface HeaderProps {
   title?: string;
@@ -27,6 +28,17 @@ export default function Header({
 }: HeaderProps) {
   const [, setLocation] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  // Handle scroll effect
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 20);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const navigationItems = [
     { name: 'Home', href: '/', icon: Home },
@@ -51,8 +63,12 @@ export default function Header({
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/50">
-      <div className="container mx-auto px-4 py-4">
+    <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+      isScrolled 
+        ? 'bg-background/95 backdrop-blur-lg border-b border-border/50 shadow-lg' 
+        : 'bg-background/80 backdrop-blur-md border-b border-border/50'
+    }`}>
+      <div className="container mx-auto px-4 py-3">
         <div className="flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center space-x-3">
@@ -60,22 +76,22 @@ export default function Header({
               <img 
                 src="/logo.jpg" 
                 alt="Let's Cook Logo" 
-                className="w-10 h-10 object-contain"
+                className="w-8 h-8 md:w-10 md:h-10 object-contain"
               />
-              <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+              <div className="absolute -top-1 -right-1 w-2 h-2 md:w-3 md:h-3 bg-green-500 rounded-full animate-pulse"></div>
             </div>
             <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+              <h1 className="text-lg md:text-xl font-bold bg-gradient-to-r from-primary to-yellow-400 bg-clip-text text-transparent">
                 {title}
               </h1>
-              <p className="text-xs text-muted-foreground">{subtitle}</p>
+              <p className="text-xs text-muted-foreground hidden sm:block">{subtitle}</p>
             </div>
           </div>
 
           {/* Desktop Navigation */}
           {showNavigation && (
             <>
-              <nav className="hidden md:flex items-center space-x-6">
+              <nav className="hidden lg:flex items-center space-x-6">
                 {navigationItems.map((item) => {
                   const Icon = item.icon;
                   return (
@@ -85,14 +101,14 @@ export default function Header({
                       className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <Icon className="w-4 h-4" />
-                      {item.name}
+                      <span className="hidden xl:inline">{item.name}</span>
                     </button>
                   );
                 })}
               </nav>
 
-              {/* Wallet Button */}
-              <div className="hidden md:block">
+              {/* Desktop Wallet Button */}
+              <div className="hidden lg:block">
                 <WalletMultiButton className="wallet-adapter-button-custom" />
               </div>
 
@@ -100,38 +116,43 @@ export default function Header({
               <Button
                 variant="ghost"
                 size="sm"
-                className="md:hidden"
+                className="lg:hidden"
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               >
                 {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </Button>
             </>
           )}
+        </div>
 
-          {/* Mobile Navigation */}
-          {showNavigation && isMobileMenuOpen && (
-            <div className="absolute top-full left-0 right-0 bg-background border-b border-border/50 md:hidden">
-              <div className="container mx-auto px-4 py-4 space-y-4">
-                {navigationItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.name}
-                      onClick={() => handleNavClick(item.href)}
-                      className="flex items-center gap-3 w-full text-left p-2 rounded-lg hover:bg-muted transition-colors"
-                    >
-                      <Icon className="w-5 h-5" />
-                      <span className="font-medium">{item.name}</span>
-                    </button>
-                  );
-                })}
-                <div className="pt-4 border-t border-border/50">
-                  <WalletMultiButton className="wallet-adapter-button-custom w-full" />
-                </div>
+        {/* Mobile Navigation */}
+        {showNavigation && isMobileMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="lg:hidden border-t border-border/50 mt-3 pt-4"
+          >
+            <div className="space-y-3">
+              {navigationItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.name}
+                    onClick={() => handleNavClick(item.href)}
+                    className="flex items-center gap-3 w-full text-left p-3 rounded-lg hover:bg-muted transition-colors"
+                  >
+                    <Icon className="w-5 h-5" />
+                    <span className="font-medium">{item.name}</span>
+                  </button>
+                );
+              })}
+              <div className="pt-3 border-t border-border/50">
+                <WalletMultiButton className="wallet-adapter-button-custom w-full" />
               </div>
             </div>
-          )}
-        </div>
+          </motion.div>
+        )}
       </div>
     </header>
   );

@@ -4,7 +4,7 @@ import { useWalletConnection } from '@/lib/wallet';
 import * as borsh from 'borsh';
 
 // Program ID from our deployed program - HARDCODED FOR TESTING
-export const PROGRAM_ID = new PublicKey("Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU");
+export const PROGRAM_ID = new PublicKey("ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
 
 // Helper function to generate real instruction discriminators
 // Using Web Crypto API to generate actual SHA256 hashes

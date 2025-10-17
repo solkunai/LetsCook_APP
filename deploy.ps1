@@ -179,3 +179,10 @@ Write-Host "`n🚀 Your CookLaunch platform is now live on Solana devnet!" -Fore
 
 
 
+
+
+
+
+
+
+

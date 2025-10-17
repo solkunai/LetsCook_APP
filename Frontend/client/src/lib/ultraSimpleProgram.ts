@@ -9,7 +9,7 @@ import {
 import { getSimpleConnection } from './simpleConnection';
 
 // Program ID from our deployed program
-const PROGRAM_ID = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU");
+const PROGRAM_ID = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
 
 export class UltraSimpleProgramService {
   private connection: Connection;

@@ -21,6 +21,14 @@ export default defineConfig(async ({ mode }) => {
   plugins: [
     react(),
     runtimeErrorOverlay(),
+    // Add Buffer polyfill
+    {
+      name: 'buffer-polyfill',
+      configResolved(config) {
+        config.define = config.define || {};
+        config.define.global = 'globalThis';
+      }
+    },
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [
@@ -38,20 +46,32 @@ export default defineConfig(async ({ mode }) => {
       "@": path.resolve(__dirname, "client", "src"),
       "@shared": path.resolve(__dirname, "shared"),
       "@assets": path.resolve(__dirname, "attached_assets"),
-      buffer: 'buffer',
     },
   },
   define: {
     global: 'globalThis',
-    'process.env': env // Ensure process.env is defined for Vite
+    'process.env': env, // Ensure process.env is defined for Vite
+    'process.env.NODE_ENV': JSON.stringify(mode),
+    'process.browser': true,
   },
   optimizeDeps: {
-    include: ['buffer'],
+    include: [
+      'buffer',
+      'process',
+      '@solana/web3.js',
+      '@solana/wallet-adapter-base',
+      '@solana/wallet-adapter-react',
+      '@solana/wallet-adapter-react-ui',
+      '@solana/wallet-adapter-wallets',
+    ],
   },
   root: path.resolve(__dirname, "client"),
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      external: [],
+    },
   },
   server: {
     fs: {

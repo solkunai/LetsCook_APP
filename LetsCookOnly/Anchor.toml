@@ -1,0 +1,19 @@
+[features]
+seeds = false
+skip-lint = false
+
+[programs.devnet]
+lets_cook = "AHM7BdR3pLaHiTAvKKLsq8ZCKyDo1VhoxnfaQaG82u1Q"
+
+[programs.mainnet]
+lets_cook = "AHM7BdR3pLaHiTAvKKLsq8ZCKyDo1VhoxnfaQaG82u1Q"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

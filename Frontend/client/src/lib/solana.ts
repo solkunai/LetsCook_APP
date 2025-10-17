@@ -1,7 +1,7 @@
 import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js';
 
-// Program ID from your Rust program - HARDCODED FOR TESTING
-export const PROGRAM_ID = new PublicKey('Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU');
+// Program ID from your deployed native Solana program
+export const PROGRAM_ID = new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ');
 
 // Network configuration
 export const NETWORK = {

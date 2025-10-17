@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle, Rocket, Loader2, CheckCircle } from 'lucide-react';
 import { ultraSimpleProgramService } from '@/lib/ultraSimpleProgram';
+import { launchService } from '@/lib/launchService';
 import Header from '@/components/Header';
 
 export default function UltraSimpleTestPage() {
@@ -11,6 +12,65 @@ export default function UltraSimpleTestPage() {
   const [isTesting, setIsTesting] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'connected' | 'failed'>('unknown');
+  const [isDebugging, setIsDebugging] = useState(false);
+
+  const debugAccountTypes = async () => {
+    setIsDebugging(true);
+    try {
+      console.log('🔍 Starting account type debugging...');
+      await launchService.debugAccountTypes();
+      console.log('✅ Debugging complete! Check console for results.');
+    } catch (error) {
+      console.error('❌ Debug error:', error);
+    } finally {
+      setIsDebugging(false);
+    }
+  };
+
+  const clearCache = () => {
+    launchService.clearCache();
+    console.log('🗑️ Cache cleared!');
+  };
+
+  const testAllAccounts = async () => {
+    setIsDebugging(true);
+    try {
+      console.log('🔍 Testing raw account fetching...');
+      await launchService.fetchAllAccountsRaw();
+      console.log('✅ Raw account test complete! Check console for results.');
+    } catch (error) {
+      console.error('❌ Raw account test error:', error);
+    } finally {
+      setIsDebugging(false);
+    }
+  };
+
+  const testRawFetching = async () => {
+    setIsDebugging(true);
+    try {
+      console.log('🔍 Testing raw account fetching...');
+      await launchService.testRawFetching();
+      console.log('✅ Raw fetching test complete! Check console for results.');
+    } catch (error) {
+      console.error('❌ Raw fetching test error:', error);
+    } finally {
+      setIsDebugging(false);
+    }
+  };
+
+  const analyzeTransaction = async () => {
+    setIsDebugging(true);
+    try {
+      console.log('🔍 Analyzing your launch transaction...');
+      const signature = '2uSynTL5BTC9nbo61fQZ8PnfuBq9HPU8d4SCeaTdCdjEPiCnNMYVwMX37A5PXy8r5aQsb2nrUhkgbFnv1x9rRMtM';
+      await launchService.analyzeTransaction(signature);
+      console.log('✅ Transaction analysis complete! Check console for results.');
+    } catch (error) {
+      console.error('❌ Transaction analysis error:', error);
+    } finally {
+      setIsDebugging(false);
+    }
+  };
 
   const testProgramConnection = async () => {
     if (!wallet) return;
@@ -52,7 +112,6 @@ export default function UltraSimpleTestPage() {
       const walletObject = {
         publicKey,
         sendTransaction,
-        signTransaction: wallet?.adapter?.signTransaction,
         ...wallet
       };
       
@@ -117,7 +176,7 @@ export default function UltraSimpleTestPage() {
               <div className="flex items-center justify-between">
                 <span>Program ID:</span>
                 <code className="text-sm bg-muted px-2 py-1 rounded">
-                  Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU
+                ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ
                 </code>
               </div>
               
@@ -155,6 +214,78 @@ export default function UltraSimpleTestPage() {
                   size="sm"
                 >
                   Request Airdrop
+                </Button>
+                
+                <Button 
+                  onClick={debugAccountTypes}
+                  disabled={isDebugging}
+                  variant="outline"
+                  size="sm"
+                >
+                  {isDebugging ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Debugging...
+                    </>
+                  ) : (
+                    'Debug Accounts'
+                  )}
+                </Button>
+                
+                <Button 
+                  onClick={clearCache}
+                  variant="outline"
+                  size="sm"
+                >
+                  Clear Cache
+                </Button>
+                
+                <Button 
+                  onClick={testAllAccounts}
+                  disabled={isDebugging}
+                  variant="outline"
+                  size="sm"
+                >
+                  {isDebugging ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    'Test All Accounts'
+                  )}
+                </Button>
+                
+                <Button 
+                  onClick={testRawFetching}
+                  disabled={isDebugging}
+                  variant="outline"
+                  size="sm"
+                >
+                  {isDebugging ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    'Test Raw Fetching'
+                  )}
+                </Button>
+                
+                <Button 
+                  onClick={analyzeTransaction}
+                  disabled={isDebugging}
+                  variant="outline"
+                  size="sm"
+                >
+                  {isDebugging ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    'Analyze Transaction'
+                  )}
                 </Button>
               </div>
             </CardContent>

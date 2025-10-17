@@ -24,15 +24,30 @@ import UserStatsPage from "@/pages/UserStatsPage";
 import HomePage from "@/pages/HomePage";
 import TokenDetailPage from "@/pages/TokenDetailPage";
 import LiquidityPage from "@/pages/LiquidityPage";
+import LaunchesPage from "@/pages/LaunchesPage";
+import LaunchDetailPage from "@/pages/LaunchDetailPage";
+import RaffleDetailPage from "@/pages/RaffleDetailPage";
+import CreateRafflePage from "@/pages/CreateRafflePage";
+import TrendingRafflesPage from "@/pages/TrendingRafflesPage";
+import TrendingTokensPage from "@/pages/TrendingTokensPage";
+import NativeProgramTestPage from "@/pages/NativeProgramTestPage";
+import BlockchainDebugPage from "@/pages/BlockchainDebugPage";
+import SimpleTestPage from "@/pages/SimpleTestPage";
 import OnboardingFlow from "@/components/OnboardingFlow";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={HomePage} />
+      <Route path="/launches" component={LaunchesPage} />
+      <Route path="/trending-raffles" component={TrendingRafflesPage} />
+      <Route path="/trending-tokens" component={TrendingTokensPage} />
+      <Route path="/launch/:id" component={({ params }: { params: { id: string } }) => <LaunchDetailPage launchId={params.id} />} />
+      <Route path="/raffle/:id" component={({ params }: { params: { id: string } }) => <RaffleDetailPage raffleId={params.id} />} />
       <Route path="/calendar" component={CalendarPage} />
       <Route path="/docs" component={DocsPage} />
       <Route path="/create-launch" component={CreateLaunchPage} />
+      <Route path="/create-raffle" component={CreateRafflePage} />
       <Route path="/instant-launch" component={InstantLaunchPage} />
       <Route path="/collections" component={CollectionsPage} />
       <Route path="/collections/launch" component={CollectionLaunchPage} />
@@ -48,6 +63,9 @@ function Router() {
       <Route path="/simple-create" component={SimpleCreateLaunchPage} />
       <Route path="/ultra-test" component={UltraSimpleTestPage} />
       <Route path="/debug" component={DebugPage} />
+      <Route path="/blockchain-debug" component={BlockchainDebugPage} />
+      <Route path="/simple-test" component={SimpleTestPage} />
+      <Route path="/native-test" component={NativeProgramTestPage} />
     </Switch>
   );
 }

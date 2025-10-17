@@ -49,7 +49,7 @@ jobs:
         run: |
           if ! command -v anchor &> /dev/null; then
             echo "=== Installing Anchor CLI ==="
-            ANCHOR_VERSION="0.31.1"
+            ANCHOR_VERSION="0.31.0"
             source $HOME/.cargo/env
             rustup default stable
             cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --force

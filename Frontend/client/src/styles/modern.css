@@ -2,37 +2,37 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  /* Core Colors */
-  --deep-space: #090b16;    /* Base background */
-  --space-blue: #0c1019;    /* Surface background */
-  --electric-blue: #00d4ff;  /* Primary accent */
-  --cosmic-purple: #8b5cf6;  /* Secondary accent */
-  --nebula-pink: #ec4899;   /* Tertiary accent */
-  --star-white: #ffffff;     /* Pure white */
-  --cosmic-gray: #94a3b8;    /* Muted text */
-  --space-gray: #64748b;     /* Subtle text */
+  /* Navy Blue & Yellow Color Scheme */
+  --deep-navy: #0a0f1c;      /* Deep navy background */
+  --navy-surface: #1a2332;   /* Navy surface background */
+  --bright-yellow: #ffd700;   /* Bright yellow primary */
+  --golden-yellow: #ffed4e;   /* Golden yellow accent */
+  --warm-yellow: #fff176;     /* Warm yellow tertiary */
+  --pure-white: #ffffff;     /* Pure white */
+  --navy-gray: #6b7280;       /* Navy muted text */
+  --light-navy: #9ca3af;      /* Light navy text */
   
   /* Semantic Colors */
-  --background: var(--deep-space);
-  --surface: var(--space-blue);
-  --foreground: var(--star-white);
-  --primary: var(--electric-blue);
-  --secondary: var(--cosmic-purple);
-  --muted: var(--cosmic-gray);
-  --muted-foreground: var(--space-gray);
+  --background: var(--deep-navy);
+  --surface: var(--navy-surface);
+  --foreground: var(--pure-white);
+  --primary: var(--bright-yellow);
+  --secondary: var(--golden-yellow);
+  --muted: var(--navy-gray);
+  --muted-foreground: var(--light-navy);
   
   /* Extended UI Colors */
-  --card: rgba(12, 16, 25, 0.7);
+  --card: rgba(26, 35, 50, 0.8);
   --card-foreground: var(--foreground);
   --popover: var(--surface);
   --popover-foreground: var(--foreground);
-  --border: rgba(148, 163, 184, 0.1);
+  --border: rgba(255, 215, 0, 0.2);
   --input: var(--surface);
-  --ring: var(--electric-blue);
+  --ring: var(--bright-yellow);
   
   /* State Colors */
   --destructive: #ef4444;
-  --destructive-foreground: var(--star-white);
+  --destructive-foreground: var(--pure-white);
   --success: #10b981;
   --warning: #f59e0b;
   --info: #3b82f6;
@@ -72,9 +72,9 @@
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   
   /* Glows */
-  --glow-sm: 0 0 15px rgba(0, 212, 255, 0.15);
-  --glow-md: 0 0 25px rgba(0, 212, 255, 0.25);
-  --glow-lg: 0 0 35px rgba(0, 212, 255, 0.35);
+  --glow-sm: 0 0 15px rgba(255, 215, 0, 0.2);
+  --glow-md: 0 0 25px rgba(255, 215, 0, 0.3);
+  --glow-lg: 0 0 35px rgba(255, 215, 0, 0.4);
 }
 
 /* Reset & Base Styles */
@@ -160,16 +160,16 @@ body {
 }
 
 .card:hover {
-  border-color: rgba(0, 212, 255, 0.1);
+  border-color: rgba(255, 215, 0, 0.3);
   transform: translateY(-2px);
-  box-shadow: var(--shadow-lg), var(--glow-sm);
+  box-shadow: var(--shadow-lg), 0 0 20px rgba(255, 215, 0, 0.2);
 }
 
 /* Glass Effect Utilities */
 .glass {
-  background: rgba(12, 16, 25, 0.7);
+  background: rgba(26, 35, 50, 0.7);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 215, 0, 0.1);
 }
 
 .glass-hover {
@@ -177,8 +177,8 @@ body {
 }
 
 .glass-hover:hover {
-  background: rgba(12, 16, 25, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(26, 35, 50, 0.8);
+  border-color: rgba(255, 215, 0, 0.2);
 }
 
 /* Modern Button Styles */
@@ -201,18 +201,18 @@ body {
 .btn-primary:hover {
   opacity: 0.9;
   transform: translateY(-1px);
-  box-shadow: var(--shadow-md), var(--glow-sm);
+  box-shadow: var(--shadow-md), 0 0 15px rgba(255, 215, 0, 0.3);
 }
 
 .btn-secondary {
-  background-color: rgba(139, 92, 246, 0.1);
+  background-color: rgba(255, 215, 0, 0.1);
   color: var(--secondary);
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  border: 1px solid rgba(255, 215, 0, 0.2);
 }
 
 .btn-secondary:hover {
-  background-color: rgba(139, 92, 246, 0.15);
-  border-color: rgba(139, 92, 246, 0.3);
+  background-color: rgba(255, 215, 0, 0.15);
+  border-color: rgba(255, 215, 0, 0.3);
 }
 
 /* Modern Form Elements */
@@ -229,7 +229,7 @@ body {
 .input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
+  box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.2);
 }
 
 /* Animations */

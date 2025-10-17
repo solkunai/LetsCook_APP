@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { launchDataService } from '../lib/launchDataService';
+import { LaunchData } from '../lib/launchDataService';
 import { useAPIServices } from '../lib/apiServices';
-import { LaunchData, MissionData, ListingData } from '../lib/apiServices';
+import { MissionData, ListingData } from '../lib/apiServices';
 
 // Query keys
 export const QUERY_KEYS = {
@@ -16,53 +18,48 @@ export const QUERY_KEYS = {
 
 // Launch queries
 export function useLaunches() {
-  const apiServices = useAPIServices();
-  
   return useQuery({
     queryKey: [QUERY_KEYS.LAUNCHES],
-    queryFn: () => apiServices.launch.getAllLaunches(),
+    queryFn: () => launchService.fetchAllLaunches(),
     staleTime: 30000, // 30 seconds
     refetchInterval: 60000, // 1 minute
   });
 }
 
 export function useLaunch(launchId: string) {
-  const apiServices = useAPIServices();
-  
   return useQuery({
     queryKey: [QUERY_KEYS.LAUNCH, launchId],
-    queryFn: () => apiServices.launch.getAllLaunches().then(launches => 
-      launches.find(launch => launch.id === launchId)
-    ),
+    queryFn: () => launchDataService.getLaunchById(launchId),
     enabled: !!launchId,
     staleTime: 30000,
   });
 }
 
 export function useActiveLaunches() {
-  const { data: launches, ...rest } = useLaunches();
-  
-  const activeLaunches = launches?.filter(launch => 
-    launch.status === 'active' || launch.status === 'upcoming'
-  ) || [];
-  
-  return {
-    data: activeLaunches,
-    ...rest,
-  };
+  return useQuery({
+    queryKey: [QUERY_KEYS.LAUNCHES, 'active'],
+    queryFn: () => launchService.fetchLiveLaunches(),
+    staleTime: 30000,
+    refetchInterval: 60000,
+  });
 }
 
 export function useUpcomingLaunches() {
-  const { data: launches, ...rest } = useLaunches();
-  
-  const upcomingLaunches = launches?.filter(launch => 
-    launch.status === 'upcoming' && launch.launchDate > Date.now() / 1000
-  ) || [];
-  
-  return {
-    data: upcomingLaunches,
-    ...rest,
-  };
+  return useQuery({
+    queryKey: [QUERY_KEYS.LAUNCHES, 'upcoming'],
+    queryFn: () => launchService.fetchUpcomingLaunches(),
+    staleTime: 30000,
+    refetchInterval: 60000,
+  });
+}
+
+export function usePlatformStats() {
+  return useQuery({
+    queryKey: ['platformStats'],
+    queryFn: () => launchService.getLaunchStats(),
+    staleTime: 60000, // 1 minute
+    refetchInterval: 300000, // 5 minutes
+  });
 }
 
 // Launch mutations
@@ -234,29 +231,7 @@ export function useAssetMetadata(assetId: string) {
   });
 }
 
-// Statistics queries
-export function usePlatformStats() {
-  const { data: launches } = useLaunches();
-  
-  const stats = {
-    totalVolume: 0,
-    successfulLaunches: 0,
-    successRate: 0,
-    totalUsers: 0,
-  };
-  
-  if (launches) {
-    stats.successfulLaunches = launches.filter(launch => launch.status === 'claimed').length;
-    stats.successRate = launches.length > 0 ? (stats.successfulLaunches / launches.length) * 100 : 0;
-    stats.totalVolume = launches.reduce((sum, launch) => sum + (launch.totalTicketsSold * launch.ticketPrice), 0);
-  }
-  
-  return {
-    data: stats,
-    isLoading: false,
-    error: null,
-  };
-}
+// Statistics queries - using blockchain service
 
 // User-specific queries
 export function useUserStats(address: string) {

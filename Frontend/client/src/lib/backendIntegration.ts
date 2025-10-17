@@ -18,6 +18,7 @@ import {
 } from '@solana/spl-token';
 import { getHeliusAPI } from './helius';
 import { PROGRAM_IDS, INSTRUCTION_DISCRIMINATORS } from './apiServices';
+import { blockchainIntegrationService, BlockchainLaunchData } from './blockchainIntegrationService';
 
 // Backend Integration Service
 export class BackendIntegration {
@@ -32,6 +33,31 @@ export class BackendIntegration {
   // Get connection
   getConnection(): Connection {
     return this.connection;
+  }
+
+  // Get all launches using blockchain integration service
+  async getAllLaunches(): Promise<BlockchainLaunchData[]> {
+    return await blockchainIntegrationService.getAllLaunches();
+  }
+
+  // Get launch by address using blockchain integration service
+  async getLaunchByAddress(address: string): Promise<BlockchainLaunchData | null> {
+    return await blockchainIntegrationService.getLaunchByAddress(address);
+  }
+
+  // Get trending launches using blockchain integration service
+  async getTrendingLaunches(limit: number = 10): Promise<BlockchainLaunchData[]> {
+    return await blockchainIntegrationService.getTrendingLaunches(limit);
+  }
+
+  // Get active raffles using blockchain integration service
+  async getActiveRaffles() {
+    return await blockchainIntegrationService.getActiveRaffles();
+  }
+
+  // Get tradable tokens using blockchain integration service
+  async getTradableTokens(): Promise<BlockchainLaunchData[]> {
+    return await blockchainIntegrationService.getTradableTokens();
   }
 
   // Derive PDAs for the main program
@@ -364,38 +390,135 @@ export class BackendIntegration {
     }
   }
 
-  // Get all launches
-  async getAllLaunches(): Promise<any[]> {
-    try {
-      const accounts = await this.connection.getProgramAccounts(PROGRAM_IDS.MAIN_PROGRAM);
-      const launches: any[] = [];
 
-      for (const account of accounts) {
-        try {
-          // Parse account data - this is simplified
-          const launchData = {
-            id: 'launch-' + Math.random().toString(36).substr(2, 9),
-            name: 'Sample Launch',
-            symbol: 'SMP',
-            status: 'active',
-            totalTicketsSold: Math.floor(Math.random() * 1000),
-            hypeScore: Math.floor(Math.random() * 100),
-            ticketPrice: 0.1 * LAMPORTS_PER_SOL,
-            numMints: 1000,
-            launchDate: Date.now() / 1000,
-            closeDate: Date.now() / 1000 + 86400,
-          };
-          launches.push(launchData);
-        } catch (error) {
-          console.error('Error parsing launch account:', error);
-        }
-      }
+  // Parse launch account data from raw bytes
+  private parseLaunchAccountData(data: Buffer, pubkey: PublicKey): any {
+    let offset = 8; // Skip discriminator (8 bytes)
+    
+    // Parse account type (1 byte)
+    const accountType = data.readUInt8(offset);
+    offset += 1;
+    
+    // Parse launch meta (1 byte)
+    const launchMeta = data.readUInt8(offset);
+    offset += 1;
+    
+    // Skip plugins vector for now
+    offset += 4; // Vector length
+    
+    // Parse timestamps
+    const lastInteraction = data.readBigUInt64LE(offset);
+    offset += 8;
+    const numInteractions = data.readUInt16LE(offset);
+    offset += 2;
+    
+    // Parse page name (string)
+    const pageNameLength = data.readUInt32LE(offset);
+    offset += 4;
+    const pageName = data.toString('utf8', offset, offset + pageNameLength);
+    offset += pageNameLength;
+    
+    // Parse listing (string)
+    const listingLength = data.readUInt32LE(offset);
+    offset += 4;
+    const listing = data.toString('utf8', offset, offset + listingLength);
+    offset += listingLength;
+    
+    // Parse numeric fields
+    const totalSupply = data.readBigUInt64LE(offset);
+    offset += 8;
+    const numMints = data.readUInt32LE(offset);
+    offset += 4;
+    const ticketPrice = data.readBigUInt64LE(offset);
+    offset += 8;
+    const minimumLiquidity = data.readBigUInt64LE(offset);
+    offset += 8;
+    const launchDate = data.readBigUInt64LE(offset);
+    offset += 8;
+    const endDate = data.readBigUInt64LE(offset);
+    offset += 8;
+    const ticketsSold = data.readUInt32LE(offset);
+    offset += 4;
+    const ticketClaimed = data.readUInt32LE(offset);
+    offset += 4;
+    const mintsWon = data.readUInt32LE(offset);
+    offset += 4;
+    
+    // Parse buffers
+    const buffer1 = data.readBigUInt64LE(offset);
+    offset += 8;
+    const buffer2 = data.readBigUInt64LE(offset);
+    offset += 8;
+    const buffer3 = data.readBigUInt64LE(offset);
+    offset += 8;
+    
+    // Skip vectors for now (distribution, flags, strings, keys)
+    // These would need proper vector parsing
+    
+    // Parse creator (32 bytes)
+    const creatorBytes = data.slice(offset, offset + 32);
+    const creator = new PublicKey(creatorBytes);
+    offset += 32;
+    
+    // Parse votes
+    const upvotes = data.readUInt32LE(offset);
+    offset += 4;
+    const downvotes = data.readUInt32LE(offset);
+    offset += 4;
+    
+    return {
+      id: pubkey.toBase58(),
+      name: pageName || 'Unknown Token',
+      symbol: 'TKN', // Would need to parse from strings vector
+      description: 'Token launch on Let\'s Cook platform',
+      image: '',
+      launchType: launchMeta === 1 ? 'instant' : 'raffle',
+      status: this.getLaunchStatus(Number(launchDate), Number(endDate)),
+      totalSupply: Number(totalSupply),
+      decimals: 9,
+      initialPrice: Number(ticketPrice) / 1e9,
+      currentPrice: Number(ticketPrice) / 1e9,
+      priceChange24h: 0,
+      volume24h: ticketsSold * (Number(ticketPrice) / 1e9),
+      marketCap: Number(totalSupply) * (Number(ticketPrice) / 1e9),
+      liquidity: Number(minimumLiquidity) / 1e9,
+      launchDate: new Date(Number(launchDate) * 1000),
+      endDate: new Date(Number(endDate) * 1000),
+      creator: creator.toBase58(),
+      website: '',
+      twitter: '',
+      telegram: '',
+      discord: '',
+      ticketPrice: Number(ticketPrice) / 1e9,
+      maxTickets: numMints,
+      soldTickets: ticketsSold,
+      winnerCount: mintsWon,
+      hypeScore: this.calculateHypeScore(upvotes, downvotes, ticketsSold, numMints),
+      participants: ticketsSold,
+      verified: true,
+      featured: upvotes > downvotes,
+      programId: PROGRAM_IDS.MAIN_PROGRAM.toBase58(),
+      listingAccount: listing,
+      launchDataAccount: pubkey.toBase58(),
+      baseTokenMint: '', // Would need to parse from keys vector
+      quoteTokenMint: 'So11111111111111111111111111111111111111112',
+      dexProvider: Number(buffer1),
+    };
+  }
 
-      return launches;
-    } catch (error) {
-      console.error('Error fetching launches:', error);
-      return [];
-    }
+  // Get launch status based on timestamps
+  private getLaunchStatus(launchDate: number, endDate: number): 'upcoming' | 'live' | 'ended' {
+    const now = Math.floor(Date.now() / 1000);
+    if (now < launchDate) return 'upcoming';
+    if (now > endDate) return 'ended';
+    return 'live';
+  }
+
+  // Calculate hype score
+  private calculateHypeScore(upvotes: number, downvotes: number, ticketsSold: number, maxTickets: number): number {
+    const voteRatio = upvotes / (upvotes + downvotes + 1);
+    const participationRatio = ticketsSold / maxTickets;
+    return Math.floor((voteRatio * 0.7 + participationRatio * 0.3) * 100);
   }
 
   // Citizens program integration

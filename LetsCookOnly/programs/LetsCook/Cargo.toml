@@ -1,0 +1,39 @@
+[package]
+name = "lets_cook"
+version = "1.0.0"
+edition = "2021"
+license = "WTFPL"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+anchor-lang = "0.31.0"
+
+# SPL Token dependencies - compatible with Anchor 0.31.0
+spl-token = { version = "3.5.0", features = ["no-entrypoint"] }
+spl-token-2022 = { version = "3.0.4", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "2.3.0", features = ["no-entrypoint"] }
+spl-token-metadata-interface = { version = "0.2.0" }
+spl-type-length-value = "0.3.0"
+spl-tlv-account-resolution = "0.5.0"
+spl-discriminator = "0.2.2"
+spl-pod = "0.2.2"
+
+# Shank for instruction generation
+shank = "0.4"
+
+# Optional tools
+thiserror = "1.0"
+borsh = "1.5.1"
+arrayref = "0.3.6"
+sha2 = "0.10.2"
+
+# Additional dependencies - compatible with Anchor 0.31.0
+orao-solana-vrf = { version = "0.4", default-features = false, features = ["cpi"] }
+proc-macro-crate = "2.0"
+toml_edit = "0.20"
+
+# MPL Core for NFT functionality - use compatible version
+mpl-core = "0.7"

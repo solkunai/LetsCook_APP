@@ -31,7 +31,7 @@ use spl_token::{instruction, state::Mint};
 //const URL: &str = "https://api.devnet.solana.com";
 const URL: &str = "https://staging-rpc.dev2.eclipsenetwork.xyz";
 
-const PROGRAM_KEY: &str = "9oQVwjBf5HQuRJFEv8yrLqoGYsR2jUDRUSHmDawpAdap";
+const PROGRAM_KEY: &str = "Cook7kyoaKaiG57VBDUjE2KuPXrWdLEu7d3FdDgsijHU";
 use std::{thread, time};
 
 fn main() {

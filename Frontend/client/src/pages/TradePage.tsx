@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { useWalletConnection } from '@/lib/wallet';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { PublicKey } from '@solana/web3.js';
 import SaucePointsTracker from "@/components/SaucePointsTracker";
 import SaucePointsBadge from "@/components/SaucePointsBadge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,141 +26,21 @@ import {
   Zap,
   BarChart3,
   Coins,
-  Wallet
+  Wallet,
+  Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/Header";
 import { 
-  fetchAMMData, 
-  buildSwapTransaction, 
-  buildAddLiquidityTransaction,
-  buildRemoveLiquidityTransaction,
-  getTokenBalance,
-  getSOLBalance,
-  connection,
-  PROGRAM_ID
-} from '@/lib/solanaProgram';
-import { PublicKey } from '@solana/web3.js';
-
-// Types for trading
-interface TokenInfo {
-  symbol: string;
-  name: string;
-  mint: PublicKey;
-  price: number;
-  change24h: number;
-  volume24h: number;
-  holders: number;
-  upvotes: number;
-  downvotes: number;
-  liquidity: number;
-  marketCap: number;
-}
-
-interface LiquidityPosition {
-  tokenSymbol: string;
-  tokenName: string;
-  lpTokens: number;
-  tokenAmount: number;
-  solAmount: number;
-  value: number;
-  apy: number;
-}
-
-interface MarketMakingReward {
-  tokenSymbol: string;
-  tokenName: string;
-  rewardAmount: number;
-  rewardToken: string;
-  launchDate: string;
-  claimed: boolean;
-}
-
-// Mock data - replace with real blockchain data
-const availableTokens: TokenInfo[] = [
-  { 
-    symbol: "SPCY", 
-    name: "Spicy Token", 
-    mint: new PublicKey("11111111111111111111111111111111"), // Placeholder
-    price: 1.05, 
-    change24h: 12.5, 
-    volume24h: 52500, 
-    holders: 1250,
-    upvotes: 89,
-    downvotes: 12,
-    liquidity: 25000,
-    marketCap: 1050000
-  },
-  { 
-    symbol: "CHEF", 
-    name: "Chef Coin", 
-    mint: new PublicKey("11111111111111111111111111111111"), // Placeholder
-    price: 0.85, 
-    change24h: -3.2, 
-    volume24h: 28000, 
-    holders: 856,
-    upvotes: 45,
-    downvotes: 23,
-    liquidity: 15000,
-    marketCap: 850000
-  },
-  { 
-    symbol: "HOT", 
-    name: "Hot Sauce", 
-    mint: new PublicKey("11111111111111111111111111111111"), // Placeholder
-    price: 2.30, 
-    change24h: 8.7, 
-    volume24h: 45000, 
-    holders: 2100,
-    upvotes: 156,
-    downvotes: 8,
-    liquidity: 35000,
-    marketCap: 2300000
-  },
-];
-
-const mockLiquidityPositions: LiquidityPosition[] = [
-  {
-    tokenSymbol: "SPCY",
-    tokenName: "Spicy Token",
-    lpTokens: 150.5,
-    tokenAmount: 2500,
-    solAmount: 2.5,
-    value: 2625,
-    apy: 15.2
-  },
-  {
-    tokenSymbol: "CHEF",
-    tokenName: "Chef Coin",
-    lpTokens: 89.2,
-    tokenAmount: 1800,
-    solAmount: 1.8,
-    value: 1530,
-    apy: 12.8
-  }
-];
-
-const mockMarketMakingRewards: MarketMakingReward[] = [
-  {
-    tokenSymbol: "SPCY",
-    tokenName: "Spicy Token",
-    rewardAmount: 125.50,
-    rewardToken: "SPCY",
-    launchDate: "2025-02-15",
-    claimed: false,
-  },
-  {
-    tokenSymbol: "CHEF",
-    tokenName: "Chef Coin",
-    rewardAmount: 89.25,
-    rewardToken: "CHEF",
-    launchDate: "2025-02-20",
-    claimed: false,
-  },
-];
+  tradingService, 
+  TokenInfo, 
+  LiquidityPosition, 
+  MarketMakingReward,
+  SwapQuote 
+} from '@/lib/tradingService';
 
 export default function TradePage() {
-  const { publicKey, connected, wallet } = useWalletConnection();
+  const { publicKey, connected, wallet } = useWallet();
   const [activeTab, setActiveTab] = useState("trade");
   const [fromToken, setFromToken] = useState("SOL");
   const [toToken, setToToken] = useState("SPCY");
@@ -170,45 +51,95 @@ export default function TradePage() {
   const [claimedRewards, setClaimedRewards] = useState<Set<string>>(new Set());
   const [userBalances, setUserBalances] = useState<{ [key: string]: number }>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [availableTokens, setAvailableTokens] = useState<TokenInfo[]>([]);
+  const [liquidityPositions, setLiquidityPositions] = useState<LiquidityPosition[]>([]);
+  const [marketMakingRewards, setMarketMakingRewards] = useState<MarketMakingReward[]>([]);
+  const [swapQuote, setSwapQuote] = useState<SwapQuote | null>(null);
   const { toast } = useToast();
 
-  const fromTokenData = fromToken === 'SOL' ? 
-    { symbol: 'SOL', name: 'Solana', price: 1, mint: new PublicKey("11111111111111111111111111111111") } : 
-    availableTokens.find(t => t.symbol === fromToken);
-  const toTokenData = toToken === 'SOL' ? 
-    { symbol: 'SOL', name: 'Solana', price: 1, mint: new PublicKey("11111111111111111111111111111111") } : 
-    availableTokens.find(t => t.symbol === toToken);
+  // Load data on component mount
+  useEffect(() => {
+    loadTradingData();
+  }, []);
 
-  // Load user balances
+  // Load user data when wallet connects
   useEffect(() => {
     if (connected && publicKey) {
-      loadUserBalances();
+      loadUserData();
     }
   }, [connected, publicKey]);
 
-  const loadUserBalances = async () => {
-    if (!publicKey) return;
-    
+  // Load swap quote when amount changes
+  useEffect(() => {
+    if (fromAmount && fromTokenData && toTokenData && parseFloat(fromAmount) > 0) {
+      loadSwapQuote();
+    } else {
+      setSwapQuote(null);
+      setToAmount("");
+    }
+  }, [fromAmount, fromToken, toToken]);
+
+  const loadTradingData = async () => {
+    setIsLoading(true);
     try {
-      const balances: { [key: string]: number } = {};
-      
-      // Get SOL balance
-      const solBalance = await getSOLBalance(publicKey);
-      balances.sol = solBalance / 1e9; // Convert lamports to SOL
-      
-      // Get token balances
-      for (const token of availableTokens) {
-        const balance = await getTokenBalance(token.mint, publicKey);
-        balances[token.symbol.toLowerCase()] = balance / 1e9; // Convert to token units
-      }
-      
-      setUserBalances(balances);
+      const tokens = await tradingService.getAvailableTokens();
+      setAvailableTokens(tokens);
     } catch (error) {
-      console.error('Error loading balances:', error);
+      console.error('Error loading trading data:', error);
+      toast({
+        title: "Error Loading Data",
+        description: "Failed to load trading data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleVote = (symbol: string, voteType: 'up' | 'down') => {
+  const loadUserData = async () => {
+    if (!publicKey) return;
+    
+    try {
+      const [balances, positions, rewards] = await Promise.all([
+        tradingService.getUserBalances(publicKey),
+        tradingService.getUserLiquidityPositions(publicKey),
+        tradingService.getMarketMakingRewards(publicKey)
+      ]);
+      
+      setUserBalances(balances);
+      setLiquidityPositions(positions);
+      setMarketMakingRewards(rewards);
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
+
+  const loadSwapQuote = async () => {
+    if (!fromTokenData || !toTokenData || !fromAmount) return;
+    
+    try {
+      const quote = await tradingService.getSwapQuote(
+        fromTokenData.mint,
+        toTokenData.mint,
+        parseFloat(fromAmount),
+        fromTokenData.dexProvider
+      );
+      
+      setSwapQuote(quote);
+      setToAmount(quote.outputAmount.toFixed(6));
+    } catch (error) {
+      console.error('Error loading swap quote:', error);
+    }
+  };
+
+  const fromTokenData = fromToken === 'SOL' ? 
+    { symbol: 'SOL', name: 'Solana', price: 1, mint: new PublicKey("So11111111111111111111111111111111111111112"), dexProvider: 'cook' as const } : 
+    availableTokens.find(t => t.symbol === fromToken);
+  const toTokenData = toToken === 'SOL' ? 
+    { symbol: 'SOL', name: 'Solana', price: 1, mint: new PublicKey("So11111111111111111111111111111111111111112"), dexProvider: 'cook' as const } : 
+    availableTokens.find(t => t.symbol === toToken);
+
+  const handleVote = async (symbol: string, voteType: 'up' | 'down') => {
     if (!connected) {
       toast({
         title: "Wallet Required",

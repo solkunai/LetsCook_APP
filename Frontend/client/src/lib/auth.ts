@@ -1,3 +1,4 @@
+import React from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -217,7 +218,7 @@ export function useUpdateProfile() {
 
 // Authentication context provider
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return React.createElement(React.Fragment, null, children);
 }
 
 // Utility functions

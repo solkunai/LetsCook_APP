@@ -17,41 +17,16 @@ import {
   Info,
   AlertCircle,
   CheckCircle,
-  ExternalLink
+  ExternalLink,
+  Zap,
+  BarChart3,
+  Loader2
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useToast } from '@/hooks/use-toast';
 import { PieChart, Cell, ResponsiveContainer, Pie, Tooltip, Legend } from 'recharts';
 import Header from '@/components/Header';
-
-interface LiquidityPool {
-  id: string;
-  tokenA: {
-    symbol: string;
-    amount: number;
-    price: number;
-  };
-  tokenB: {
-    symbol: string;
-    amount: number;
-    price: number;
-  };
-  totalLiquidity: number;
-  apr: number;
-  volume24h: number;
-  fees24h: number;
-  share: number;
-}
-
-interface UserLiquidityPosition {
-  poolId: string;
-  tokenA: string;
-  tokenB: string;
-  liquidity: number;
-  share: number;
-  value: number;
-  feesEarned: number;
-}
+import { liquidityService, LiquidityPool, UserLiquidityPosition } from '@/lib/liquidityService';
 
 export default function LiquidityPage() {
   const { connected, publicKey } = useWallet();
@@ -67,59 +42,45 @@ export default function LiquidityPage() {
   const [addTokenB, setAddTokenB] = useState('');
   const [selectedPool, setSelectedPool] = useState<string>('');
 
-  // Mock data
+  // Load data on component mount
   useEffect(() => {
-    const mockPools: LiquidityPool[] = [
-      {
-        id: '1',
-        tokenA: { symbol: 'CHEF', amount: 1000000, price: 0.000123 },
-        tokenB: { symbol: 'SOL', amount: 123, price: 100 },
-        totalLiquidity: 24600,
-        apr: 15.5,
-        volume24h: 125000,
-        fees24h: 1250,
-        share: 0
-      },
-      {
-        id: '2',
-        tokenA: { symbol: 'COOK', amount: 500000, price: 0.000456 },
-        tokenB: { symbol: 'SOL', amount: 228, price: 100 },
-        totalLiquidity: 45600,
-        apr: 22.3,
-        volume24h: 89000,
-        fees24h: 890,
-        share: 0
-      },
-      {
-        id: '3',
-        tokenA: { symbol: 'SPICE', amount: 2000000, price: 0.000078 },
-        tokenB: { symbol: 'SOL', amount: 156, price: 100 },
-        totalLiquidity: 31200,
-        apr: 18.7,
-        volume24h: 67000,
-        fees24h: 670,
-        share: 0
-      }
-    ];
-
-    const mockPositions: UserLiquidityPosition[] = [
-      {
-        poolId: '1',
-        tokenA: 'CHEF',
-        tokenB: 'SOL',
-        liquidity: 1000,
-        share: 4.1,
-        value: 1008.2,
-        feesEarned: 15.5
-      }
-    ];
-
-    setTimeout(() => {
-      setPools(mockPools);
-      setUserPositions(mockPositions);
-      setIsLoading(false);
-    }, 1000);
+    loadLiquidityData();
   }, []);
+
+  // Load user positions when wallet connects
+  useEffect(() => {
+    if (connected && publicKey) {
+      loadUserPositions();
+    }
+  }, [connected, publicKey]);
+
+  const loadLiquidityData = async () => {
+    setIsLoading(true);
+    try {
+      const poolsData = await liquidityService.getLiquidityPools();
+      setPools(poolsData);
+    } catch (error) {
+      console.error('Error loading liquidity data:', error);
+      toast({
+        title: "Error Loading Data",
+        description: "Failed to load liquidity pools. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadUserPositions = async () => {
+    if (!publicKey) return;
+    
+    try {
+      const positions = await liquidityService.getUserLiquidityPositions(publicKey);
+      setUserPositions(positions);
+    } catch (error) {
+      console.error('Error loading user positions:', error);
+    }
+  };
 
   const handleAddLiquidity = async () => {
     if (!connected) {
@@ -142,18 +103,33 @@ export default function LiquidityPage() {
 
     setIsAddingLiquidity(true);
     try {
-      // Real liquidity addition logic would go here
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const pool = pools.find(p => p.id === selectedPool);
+      if (!pool) throw new Error('Pool not found');
+
+      const signature = await liquidityService.addLiquidity(
+        pool.id,
+        pool.dexProvider,
+        pool.tokenA.mint,
+        pool.tokenB.mint,
+        parseFloat(addTokenA),
+        parseFloat(addTokenB),
+        publicKey!
+      );
       
       toast({
         title: "Liquidity Added",
-        description: "Successfully added liquidity to the pool.",
+        description: `Successfully added liquidity to ${pool.tokenA.symbol}/${pool.tokenB.symbol} pool.`,
       });
       
       setAddTokenA('');
       setAddTokenB('');
       setSelectedPool('');
+      
+      // Refresh data
+      await loadUserPositions();
+      
     } catch (error) {
+      console.error('Add liquidity error:', error);
       toast({
         title: "Add Liquidity Failed",
         description: "Please try again later.",
@@ -176,14 +152,27 @@ export default function LiquidityPage() {
 
     setIsRemovingLiquidity(true);
     try {
-      // Real liquidity removal logic would go here
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const position = userPositions.find(p => p.poolId === positionId);
+      if (!position) throw new Error('Position not found');
+
+      const signature = await liquidityService.removeLiquidity(
+        position.poolId,
+        position.dexProvider,
+        position.lpTokenMint,
+        position.liquidity,
+        publicKey!
+      );
       
       toast({
         title: "Liquidity Removed",
-        description: "Successfully removed liquidity from the pool.",
+        description: `Successfully removed liquidity from ${position.tokenA}/${position.tokenB} pool.`,
       });
+      
+      // Refresh data
+      await loadUserPositions();
+      
     } catch (error) {
+      console.error('Remove liquidity error:', error);
       toast({
         title: "Remove Liquidity Failed",
         description: "Please try again later.",
@@ -197,228 +186,350 @@ export default function LiquidityPage() {
   const totalValue = userPositions.reduce((sum, pos) => sum + pos.value, 0);
   const totalFees = userPositions.reduce((sum, pos) => sum + pos.feesEarned, 0);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4" />
-          <p>Loading liquidity data...</p>
-        </div>
-      </div>
-    );
-  }
+  // Prepare chart data
+  const chartData = userPositions.map(position => ({
+    name: `${position.tokenA}/${position.tokenB}`,
+    value: position.value,
+    dex: position.dexProvider
+  }));
+
+  const COLORS = {
+    cook: '#ffd700',
+    raydium: '#3b82f6'
+  };
 
   return (
     <div className="min-h-screen bg-background">
       <Header 
-        title="Liquidity Pools" 
-        subtitle="Provide liquidity and earn fees"
+        title="Liquidity Pools"
+        subtitle="Provide liquidity and earn rewards"
         showNavigation={true}
       />
 
-      <div className="container mx-auto p-6 pt-24">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Content */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* User Positions */}
-            {userPositions.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6 }}
-              >
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Activity className="w-5 h-5" />
-                      Your Positions
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {userPositions.map((position, index) => (
-                        <div key={index} className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-                          <div className="flex items-center gap-4">
-                            <div className="flex -space-x-2">
-                              <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center border-2 border-background">
-                                <span className="text-xs font-bold text-primary">
-                                  {position.tokenA.charAt(0)}
-                                </span>
-                              </div>
-                              <div className="w-8 h-8 bg-secondary/20 rounded-full flex items-center justify-center border-2 border-background">
-                                <span className="text-xs font-bold text-secondary">
-                                  {position.tokenB.charAt(0)}
-                                </span>
-                              </div>
-                            </div>
-                            <div>
-                              <div className="font-medium">
-                                {position.tokenA}/{position.tokenB}
-                              </div>
-                              <div className="text-sm text-muted-foreground">
-                                {position.share}% of pool
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="font-medium">${position.value.toFixed(2)}</div>
-                            <div className="text-sm text-green-500">
-                              +${position.feesEarned.toFixed(2)} fees
-                            </div>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleRemoveLiquidity(position.poolId)}
-                            disabled={isRemovingLiquidity}
-                          >
-                            <Minus className="w-4 h-4 mr-2" />
-                            Remove
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
+      <div className="container mx-auto px-4 py-8 pt-24">
+        <Tabs defaultValue="pools" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="pools">Available Pools</TabsTrigger>
+            <TabsTrigger value="positions">Your Positions</TabsTrigger>
+            <TabsTrigger value="add">Add Liquidity</TabsTrigger>
+          </TabsList>
 
-            {/* Available Pools */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5" />
-                    Available Pools
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {pools.map((pool) => (
-                      <div key={pool.id} className="flex items-center justify-between p-4 rounded-lg border">
-                        <div className="flex items-center gap-4">
-                          <div className="flex -space-x-2">
-                            <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center border-2 border-background">
-                              <span className="text-sm font-bold text-primary">
-                                {pool.tokenA.symbol.charAt(0)}
-                              </span>
+          <TabsContent value="pools" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">Available Liquidity Pools</h2>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={loadLiquidityData}
+                disabled={isLoading}
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
+
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="ml-2">Loading pools...</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {pools.map((pool) => (
+                  <motion.div
+                    key={pool.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <Card className="hover:shadow-lg transition-all duration-300 border-border/50 hover:border-primary/50">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <div className="flex items-center gap-1">
+                              <div className="w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center">
+                                <span className="text-xs font-bold">{pool.tokenA.symbol[0]}</span>
+                              </div>
+                              <span>/</span>
+                              <div className="w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center">
+                                <span className="text-xs font-bold">{pool.tokenB.symbol[0]}</span>
+                              </div>
                             </div>
-                            <div className="w-10 h-10 bg-secondary/20 rounded-full flex items-center justify-center border-2 border-background">
-                              <span className="text-sm font-bold text-secondary">
-                                {pool.tokenB.symbol.charAt(0)}
-                              </span>
-                            </div>
+                          </CardTitle>
+                          <Badge variant={pool.dexProvider === 'cook' ? 'default' : 'secondary'}>
+                            {pool.dexProvider === 'cook' ? (
+                              <>
+                                <Zap className="w-3 h-3 mr-1" />
+                                Cook DEX
+                              </>
+                            ) : (
+                              <>
+                                <BarChart3 className="w-3 h-3 mr-1" />
+                                Raydium
+                              </>
+                            )}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">APR</span>
+                            <div className="font-semibold text-primary">{pool.apr.toFixed(1)}%</div>
                           </div>
                           <div>
-                            <div className="font-medium text-lg">
-                              {pool.tokenA.symbol}/{pool.tokenB.symbol}
+                            <span className="text-muted-foreground">Volume 24h</span>
+                            <div className="font-semibold">${pool.volume24h.toLocaleString()}</div>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Total Liquidity</span>
+                            <div className="font-semibold">${pool.totalLiquidity.toLocaleString()}</div>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Fees 24h</span>
+                            <div className="font-semibold">${pool.fees24h.toLocaleString()}</div>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t">
+                          <div className="text-sm text-muted-foreground mb-2">Pool Composition</div>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span>{pool.tokenA.symbol}</span>
+                              <span>{pool.tokenA.amount.toLocaleString()}</span>
                             </div>
-                            <div className="text-sm text-muted-foreground">
-                              Total Liquidity: ${pool.totalLiquidity.toLocaleString()}
+                            <div className="flex justify-between">
+                              <span>{pool.tokenB.symbol}</span>
+                              <span>{pool.tokenB.amount.toLocaleString()}</span>
                             </div>
                           </div>
                         </div>
-                        <div className="text-right space-y-1">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="text-green-600">
-                              {pool.apr}% APR
-                            </Badge>
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            24h Volume: ${pool.volume24h.toLocaleString()}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            24h Fees: ${pool.fees24h.toLocaleString()}
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
+
+                        <Button 
+                          className="w-full" 
                           onClick={() => setSelectedPool(pool.id)}
                         >
                           <Plus className="w-4 h-4 mr-2" />
-                          Add
+                          Add Liquidity
                         </Button>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="positions" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">Your Liquidity Positions</h2>
+              {connected && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={loadUserPositions}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Refresh
+                </Button>
+              )}
+            </div>
+
+            {!connected ? (
+              <Card className="p-8 text-center">
+                <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">Connect Your Wallet</h3>
+                <p className="text-muted-foreground">
+                  Connect your wallet to view your liquidity positions and earnings.
+                </p>
+              </Card>
+            ) : userPositions.length === 0 ? (
+              <Card className="p-8 text-center">
+                <Info className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Positions Found</h3>
+                <p className="text-muted-foreground">
+                  You don't have any liquidity positions yet. Add liquidity to start earning rewards.
+                </p>
+              </Card>
+            ) : (
+              <>
+                {/* Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-3">
+                        <DollarSign className="w-8 h-8 text-primary" />
+                        <div>
+                          <p className="text-sm text-muted-foreground">Total Value</p>
+                          <p className="text-2xl font-bold">${totalValue.toFixed(2)}</p>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </div>
+                    </CardContent>
+                  </Card>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Portfolio Summary */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <DollarSign className="w-5 h-5" />
-                    Portfolio
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold">${totalValue.toFixed(2)}</div>
-                    <div className="text-sm text-muted-foreground">Total Value</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-green-500">
-                      +${totalFees.toFixed(2)}
-                    </div>
-                    <div className="text-sm text-muted-foreground">Fees Earned</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold">{userPositions.length}</div>
-                    <div className="text-sm text-muted-foreground">Active Positions</div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-3">
+                        <TrendingUp className="w-8 h-8 text-green-500" />
+                        <div>
+                          <p className="text-sm text-muted-foreground">Fees Earned</p>
+                          <p className="text-2xl font-bold">${totalFees.toFixed(2)}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-            {/* Add Liquidity */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Plus className="w-5 h-5" />
-                    Add Liquidity
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <Label htmlFor="pool">Select Pool</Label>
-                    <Select value={selectedPool} onValueChange={setSelectedPool}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Choose a pool" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {pools.map((pool) => (
-                          <SelectItem key={pool.id} value={pool.id}>
-                            {pool.tokenA.symbol}/{pool.tokenB.symbol}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-3">
+                        <Activity className="w-8 h-8 text-blue-500" />
+                        <div>
+                          <p className="text-sm text-muted-foreground">Active Positions</p>
+                          <p className="text-2xl font-bold">{userPositions.length}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
 
-                  {selectedPool && (
-                    <>
+                {/* Positions List */}
+                <div className="space-y-4">
+                  {userPositions.map((position) => (
+                    <motion.div
+                      key={position.poolId}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <Card>
+                        <CardContent className="p-6">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
+                                  <span className="text-sm font-bold">{position.tokenA[0]}</span>
+                                </div>
+                                <span>/</span>
+                                <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
+                                  <span className="text-sm font-bold">{position.tokenB[0]}</span>
+                                </div>
+                              </div>
+                              <div>
+                                <h3 className="font-semibold">{position.tokenA}/{position.tokenB}</h3>
+                                <p className="text-sm text-muted-foreground">
+                                  {position.dexProvider === 'cook' ? 'Cook DEX' : 'Raydium'}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div className="text-right">
+                              <p className="font-semibold">${position.value.toFixed(2)}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {position.share.toFixed(2)}% of pool
+                              </p>
+                            </div>
+
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleRemoveLiquidity(position.poolId)}
+                                disabled={isRemovingLiquidity}
+                              >
+                                <Minus className="w-4 h-4 mr-1" />
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">LP Tokens</span>
+                              <div className="font-semibold">{position.liquidity.toFixed(2)}</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Pool Share</span>
+                              <div className="font-semibold">{position.share.toFixed(2)}%</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Fees Earned</span>
+                              <div className="font-semibold">${position.feesEarned.toFixed(2)}</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">DEX</span>
+                              <div className="font-semibold capitalize">{position.dexProvider}</div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+
+                {/* Chart */}
+                {chartData.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Portfolio Distribution</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                          <Pie
+                            data={chartData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {chartData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[entry.dex as keyof typeof COLORS]} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="add" className="space-y-6">
+            <h2 className="text-2xl font-bold">Add Liquidity</h2>
+            
+            <Card>
+              <CardHeader>
+                <CardTitle>Add Liquidity to Pool</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="pool-select">Select Pool</Label>
+                  <Select value={selectedPool} onValueChange={setSelectedPool}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a pool" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pools.map((pool) => (
+                        <SelectItem key={pool.id} value={pool.id}>
+                          {pool.tokenA.symbol}/{pool.tokenB.symbol} - {pool.dexProvider === 'cook' ? 'Cook DEX' : 'Raydium'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {selectedPool && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="tokenA">Amount ({pools.find(p => p.id === selectedPool)?.tokenA.symbol})</Label>
+                        <Label htmlFor="tokenA">Token A Amount</Label>
                         <Input
                           id="tokenA"
                           type="number"
@@ -428,7 +539,7 @@ export default function LiquidityPage() {
                         />
                       </div>
                       <div>
-                        <Label htmlFor="tokenB">Amount ({pools.find(p => p.id === selectedPool)?.tokenB.symbol})</Label>
+                        <Label htmlFor="tokenB">Token B Amount</Label>
                         <Input
                           id="tokenB"
                           type="number"
@@ -437,69 +548,31 @@ export default function LiquidityPage() {
                           onChange={(e) => setAddTokenB(e.target.value)}
                         />
                       </div>
-                    </>
-                  )}
-
-                  <Button
-                    onClick={handleAddLiquidity}
-                    disabled={!connected || !addTokenA || !addTokenB || !selectedPool || isAddingLiquidity}
-                    className="w-full"
-                  >
-                    {isAddingLiquidity ? (
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Plus className="w-4 h-4 mr-2" />
-                    )}
-                    {isAddingLiquidity ? 'Adding...' : 'Add Liquidity'}
-                  </Button>
-
-                  {!connected && (
-                    <div className="flex items-center gap-2 p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
-                      <AlertCircle className="w-4 h-4 text-yellow-600" />
-                      <span className="text-sm text-yellow-800 dark:text-yellow-200">
-                        Connect your wallet to add liquidity
-                      </span>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
 
-            {/* Info */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Info className="w-5 h-5" />
-                    How It Works
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm text-muted-foreground">
-                  <div className="flex items-start gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>Provide equal value of both tokens</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>Earn fees from trading activity</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>Remove liquidity anytime</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span>Impermanent loss risk applies</span>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </div>
-        </div>
+                    <Button 
+                      className="w-full" 
+                      onClick={handleAddLiquidity}
+                      disabled={isAddingLiquidity || !addTokenA || !addTokenB}
+                    >
+                      {isAddingLiquidity ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Adding Liquidity...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Add Liquidity
+                        </>
+                      )}
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
