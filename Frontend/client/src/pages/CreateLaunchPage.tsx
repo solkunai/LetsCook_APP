@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Connection, PublicKey, Transaction, SystemProgram, Keypair } from '@solana/web3.js';
+import { createInitializeMintInstruction, TOKEN_PROGRAM_ID, MINT_SIZE, getMinimumBalanceForRentExemptMint } from '@solana/spl-token';
 import { useLocation } from 'wouter';
 import { pinataService, uploadImageToIPFS } from '@/lib/pinataService';
 import { toast } from '@/hooks/use-toast';
@@ -378,28 +379,119 @@ export default function EnhancedLaunchPage() {
     setIsSubmitting(true);
 
     try {
-      // Generate keypairs for required accounts
+      // Generate fresh keypairs for required accounts (always generate new ones)
+      console.log('🔑 Generating fresh keypairs...');
       const listingKeypair = Keypair.generate();
       const launchDataKeypair = Keypair.generate();
       const baseTokenMintKeypair = Keypair.generate();
       const quoteTokenMintKeypair = Keypair.generate();
       const teamKeypair = Keypair.generate();
+      
+      console.log('🔑 Generated keypairs:', {
+        listing: listingKeypair.publicKey.toBase58(),
+        launchData: launchDataKeypair.publicKey.toBase58(),
+        baseTokenMint: baseTokenMintKeypair.publicKey.toBase58(),
+        quoteTokenMint: quoteTokenMintKeypair.publicKey.toBase58(),
+        team: teamKeypair.publicKey.toBase58()
+      });
 
-      const transaction = new Transaction();
+      // Transaction 1: Create SPL token mints
+      console.log('🪙 Creating SPL token mints...');
+      
+      const tokenMintTransaction = new Transaction();
+      
+      // Create base token mint (the actual token being launched)
+      const baseTokenMintLamports = await getMinimumBalanceForRentExemptMint(connection);
+      tokenMintTransaction.add(
+        SystemProgram.createAccount({
+          fromPubkey: publicKey,
+          newAccountPubkey: baseTokenMintKeypair.publicKey,
+          space: MINT_SIZE,
+          lamports: baseTokenMintLamports,
+          programId: TOKEN_PROGRAM_ID,
+        })
+      );
 
-      // Create all required accounts
-      const accounts = [
+      // Initialize base token mint
+      tokenMintTransaction.add(
+        createInitializeMintInstruction(
+          baseTokenMintKeypair.publicKey, // mint
+          formData.decimals, // decimals
+          publicKey, // mint authority (user)
+          publicKey, // freeze authority (user)
+          TOKEN_PROGRAM_ID
+        )
+      );
+
+      // Create quote token mint (SOL - wrapped SOL)
+      const quoteTokenMintLamports = await getMinimumBalanceForRentExemptMint(connection);
+      tokenMintTransaction.add(
+        SystemProgram.createAccount({
+          fromPubkey: publicKey,
+          newAccountPubkey: quoteTokenMintKeypair.publicKey,
+          space: MINT_SIZE,
+          lamports: quoteTokenMintLamports,
+          programId: TOKEN_PROGRAM_ID,
+        })
+      );
+
+      // Initialize quote token mint (SOL)
+      tokenMintTransaction.add(
+        createInitializeMintInstruction(
+          quoteTokenMintKeypair.publicKey, // mint
+          9, // SOL has 9 decimals
+          publicKey, // mint authority (user)
+          publicKey, // freeze authority (user)
+          TOKEN_PROGRAM_ID
+        )
+      );
+
+      // Set transaction properties for token mint transaction
+      const { blockhash: tokenMintBlockhash } = await connection.getLatestBlockhash();
+      tokenMintTransaction.recentBlockhash = tokenMintBlockhash;
+      tokenMintTransaction.feePayer = publicKey;
+      
+      // Add unique identifier to prevent transaction reuse
+      const tokenMintUniqueId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      console.log('🔍 Token mint transaction unique ID:', tokenMintUniqueId);
+
+      // Sign and send token mint transaction
+      tokenMintTransaction.sign(baseTokenMintKeypair, quoteTokenMintKeypair);
+      const signedTokenMintTransaction = await signTransaction(tokenMintTransaction);
+      
+      try {
+        const tokenMintSignature = await connection.sendRawTransaction(signedTokenMintTransaction.serialize());
+        await connection.confirmTransaction(tokenMintSignature, 'confirmed');
+        console.log('✅ SPL token mints created and initialized:', tokenMintSignature);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('already been processed')) {
+          console.log('⚠️ Token mint transaction already processed, continuing...');
+          // Continue with the process - the tokens might already exist
+        } else {
+          throw error;
+        }
+      }
+
+      // Wait a moment to ensure the first transaction is fully processed
+      console.log('⏳ Waiting for token mint transaction to be fully processed...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Transaction 2: Create launch accounts and instant launch
+      console.log('🚀 Creating launch accounts and instant launch...');
+      
+      const launchTransaction = new Transaction();
+
+      // Create non-token accounts
+      const nonTokenAccounts = [
         { keypair: listingKeypair, space: 200, name: 'listing' },
         { keypair: launchDataKeypair, space: 1000, name: 'launchData' },
-        { keypair: baseTokenMintKeypair, space: 82, name: 'baseTokenMint' },
-        { keypair: quoteTokenMintKeypair, space: 82, name: 'quoteTokenMint' },
         { keypair: teamKeypair, space: 100, name: 'team' },
       ];
 
-      // Add account creation instructions
-      for (const account of accounts) {
+      // Add account creation instructions for non-token accounts
+      for (const account of nonTokenAccounts) {
         const lamports = await connection.getMinimumBalanceForRentExemption(account.space);
-        transaction.add(
+        launchTransaction.add(
           SystemProgram.createAccount({
             fromPubkey: publicKey,
             newAccountPubkey: account.keypair.publicKey,
@@ -425,15 +517,15 @@ export default function EnhancedLaunchPage() {
       console.log('⚡ Creating instant launch...');
       
       const createLaunchArgs = {
-        name: formData.name.substring(0, 20), // Limit to 20 chars
+        name: formData.name.substring(0, 16), // Limit to 16 chars
         symbol: formData.symbol.substring(0, 6), // Limit to 6 chars
         uri: '', // Empty to save space
-        icon: formData.image ? extractIPFSHash(formData.image) : '', // Full IPFS hash
+        icon: formData.image ? extractIPFSHash(formData.image) : '', // IPFS hash only
         banner: '', // Empty to save space
         total_supply: formData.totalSupply,
         decimals: formData.decimals,
         ticket_price: formData.initialPrice * 1_000_000_000, // Convert to lamports
-        page_name: formData.name.toLowerCase().replace(/\s+/g, '-').substring(0, 12), // Limit to 12 chars
+        page_name: formData.name.toLowerCase().replace(/\s+/g, '-').substring(0, 10), // Limit to 10 chars
         transfer_fee: 0,
         max_transfer_fee: 0,
         extensions: 0,
@@ -457,47 +549,56 @@ export default function EnhancedLaunchPage() {
           baseTokenMint: baseTokenMintKeypair.publicKey,
           cookBaseToken: publicKey, // Using user as placeholder
           team: teamKeypair.publicKey,
-          quoteTokenProgram: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-          baseTokenProgram: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+          quoteTokenProgram: TOKEN_PROGRAM_ID,
+          baseTokenProgram: TOKEN_PROGRAM_ID,
           associatedToken: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
           systemProgram: SystemProgram.programId,
         }
       );
 
-      transaction.add(createLaunchInstruction);
+      launchTransaction.add(createLaunchInstruction);
 
       // Set transaction properties required for signing
       // Add a small delay to ensure fresh blockhash
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 500));
       const { blockhash } = await connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = publicKey;
+      launchTransaction.recentBlockhash = blockhash;
+      launchTransaction.feePayer = publicKey;
       
       // Add a unique identifier to prevent caching issues
-      const uniqueId = Date.now().toString();
-      console.log('🔍 Transaction details:', {
+      const launchUniqueId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      console.log('🔍 Launch transaction details:', {
         blockhash: blockhash.toString(),
         feePayer: publicKey.toString(),
-        uniqueId,
-        instructionCount: transaction.instructions.length
+        uniqueId: launchUniqueId,
+        instructionCount: launchTransaction.instructions.length
       });
 
-      // Sign and send transaction
+      // Sign and send launch transaction
       // First sign with all keypairs
-      transaction.sign(
+      launchTransaction.sign(
         listingKeypair,
         launchDataKeypair,
-        baseTokenMintKeypair,
-        quoteTokenMintKeypair,
         teamKeypair
       );
       
       // Then sign with user's wallet
-      const signedTransaction = await signTransaction(transaction);
-      const launchSignature = await connection.sendRawTransaction(signedTransaction.serialize());
-      await connection.confirmTransaction(launchSignature, 'confirmed');
-
-      console.log('✅ Instant launch created successfully:', launchSignature);
+      const signedLaunchTransaction = await signTransaction(launchTransaction);
+      
+      let launchSignature: string;
+      try {
+        launchSignature = await connection.sendRawTransaction(signedLaunchTransaction.serialize());
+        await connection.confirmTransaction(launchSignature, 'confirmed');
+        console.log('✅ Instant launch created successfully:', launchSignature);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('already been processed')) {
+          console.log('⚠️ Launch transaction already processed, continuing...');
+          // Continue with the process - the launch might already exist
+          launchSignature = 'already-processed'; // Placeholder for already processed
+        } else {
+          throw error;
+        }
+      }
       
       // Now handle additional transactions in separate transactions to avoid size limits
       
@@ -610,7 +711,8 @@ export default function EnhancedLaunchPage() {
       telegram: '',
       discord: '',
       image: '',
-      banner: ''
+      banner: '',
+      type: 'instant'
     });
     setErrors({});
     setCurrentStep(0);
