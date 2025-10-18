@@ -247,7 +247,7 @@ const LaunchesPage: React.FC = () => {
               )}
             </div>
             <p className="text-gray-400 text-sm mt-1">{launch.symbol}</p>
-            <p className="text-gray-500 text-xs mt-1">CA: {launch.id.substring(0, 4)}...{launch.id.substring(launch.id.length - 4)}</p>
+            <p className="text-gray-500 text-xs mt-1">CA: {launch.baseTokenMint.substring(0, 4)}...{launch.baseTokenMint.substring(launch.baseTokenMint.length - 4)}</p>
           </div>
         </div>
 
@@ -309,8 +309,8 @@ const LaunchesPage: React.FC = () => {
             className="p-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors"
             onClick={(e) => {
               e.stopPropagation();
-              // Copy CA to clipboard
-              navigator.clipboard.writeText(launch.id);
+              // Copy contract address (SPL token mint) to clipboard
+              navigator.clipboard.writeText(launch.baseTokenMint);
               toast({
                 title: "Copied!",
                 description: "Contract address copied to clipboard.",

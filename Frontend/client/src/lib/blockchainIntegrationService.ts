@@ -29,6 +29,8 @@ export interface BlockchainLaunchData {
   ticketsSold: number;
   ticketsClaimed: number;
   mintsWon: number;
+  baseTokenMint: string; // SPL token mint address
+  quoteTokenMint: string; // Quote token mint (usually SOL)
   rawMetadata?: {
     tokenName: string | null;
     tokenSymbol: string | null;
@@ -387,6 +389,31 @@ export class BlockchainIntegrationService {
         keys.push(keyValue);
       }
       
+      // Extract actual SPL token mint from keys array
+      let actualTokenMint = '';
+      console.log('🔍 Parsing keys array for token mint:', keys);
+      for (const key of keys) {
+        console.log('🔍 Checking key:', key, 'length:', key.length);
+        // Try to parse as PublicKey to find valid SPL token mints
+        try {
+          // Skip IPFS hashes and other non-PublicKey strings
+          if (key.length === 44 && !key.includes('bafkrei') && !key.includes('Qm')) {
+            const publicKey = new PublicKey(key);
+            console.log('✅ Found valid PublicKey:', publicKey.toBase58());
+            // For instant launches, the first valid PublicKey in keys is usually the token mint
+            if (!actualTokenMint) {
+              actualTokenMint = publicKey.toBase58();
+              console.log('🎯 Using as token mint:', actualTokenMint);
+            }
+          } else {
+            console.log('⚠️ Skipping key (not valid PublicKey):', key);
+          }
+        } catch (e) {
+          console.log('❌ Invalid PublicKey:', key, e);
+        }
+      }
+      console.log('🔍 Final token mint:', actualTokenMint || 'NOT FOUND');
+      
       // Read creator Pubkey (32 bytes)
       const creatorBytes = Array.from(data.slice(offset, offset + 32));
       offset += 32;
@@ -566,10 +593,18 @@ export class BlockchainIntegrationService {
         ticketsSold,
         ticketsClaimed: ticketClaimed,
         mintsWon,
+        baseTokenMint: actualTokenMint || accountPubkey.toBase58(), // Use actual SPL token mint or fallback to launch account
+        quoteTokenMint: 'So11111111111111111111111111111111111111112', // SOL
         rawMetadata: {
           tokenName, tokenSymbol, tokenUri, tokenIcon, tokenBanner, strings, keys
         }
       };
+      
+      console.log('🎯 Final BlockchainLaunchData:', {
+        id: accountPubkey.toBase58(),
+        baseTokenMint: actualTokenMint || accountPubkey.toBase58(),
+        actualTokenMintFound: !!actualTokenMint
+      });
     } catch (error) {
       console.error('❌ Error parsing launch account data:', {
         accountAddress: accountPubkey.toBase58(),

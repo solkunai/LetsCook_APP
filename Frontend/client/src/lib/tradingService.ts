@@ -180,14 +180,9 @@ export class TradingService {
       const amountInLamports = Math.floor(solAmount * LAMPORTS_PER_SOL);
       const minimumTokenAmount = Math.floor(solAmount * 1000 * 0.995); // 0.5% slippage tolerance
       
-      // Derive the correct accounts for SwapRaydium
+      // Derive the correct accounts for Cook AMM
       const [launchDataAccount] = PublicKey.findProgramAddressSync(
         [Buffer.from('launch'), tokenMintKey.toBuffer()],
-        PROGRAM_ID
-      );
-      
-      const [ammAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenMintKey.toBuffer()],
         PROGRAM_ID
       );
       
@@ -208,55 +203,52 @@ export class TradingService {
         console.log('📝 Using derived ATA address without creation:', userTokenAccount.toBase58());
       }
       
-      // Create instruction data based on DEX provider
+      // Create instruction data for Cook AMM swap
       let instructionData: Buffer;
       
-      // TEMPORARY: Force Raydium to test if the issue is with CookDEX specifically
-      console.log('🧪 TEMPORARY: Forcing Raydium to test if CookDEX is the issue');
+      // Use Cook AMM instruction (variant 20) - this is what our program expects
+      console.log('⚡ Using Cook AMM swap instruction');
       
-      if (true || dexProvider === 'cook') { // Force Raydium for now
-        // Use SwapRaydium instruction (variant 21)
-        const argsBuffer = Buffer.alloc(16); // u64 + u64 = 16 bytes
-        argsBuffer.writeBigUInt64LE(BigInt(amountInLamports), 0);
-        argsBuffer.writeBigUInt64LE(BigInt(minimumTokenAmount), 8);
-        
-        instructionData = Buffer.concat([
-          Buffer.from([21]), // SwapRaydium variant index
-          argsBuffer
-        ]);
-        console.log('⚡ Using Raydium SwapRaydium instruction (forced)');
-      } else {
-        // Use SwapRaydium instruction (variant 21)
-        const argsBuffer = Buffer.alloc(16); // u64 + u64 = 16 bytes
-        argsBuffer.writeBigUInt64LE(BigInt(amountInLamports), 0);
-        argsBuffer.writeBigUInt64LE(BigInt(minimumTokenAmount), 8);
-        
-        instructionData = Buffer.concat([
-          Buffer.from([21]), // SwapRaydium variant index
-          argsBuffer
-        ]);
-        console.log('⚡ Using Raydium SwapRaydium instruction');
-      }
+      // Cook AMM uses PlaceOrderArgs with all required fields
+      const argsBuffer = Buffer.alloc(44); // u8 + u64 + u64 + u64 + u8 + u64 + u16 = 1 + 8 + 8 + 8 + 1 + 8 + 2 = 36 bytes, padded to 44
+      let offset = 0;
+      argsBuffer.writeUInt8(0, offset); // side: 0 = buy, 1 = sell
+      offset += 1;
+      argsBuffer.writeBigUInt64LE(BigInt(0), offset); // limit_price: 0 (market order)
+      offset += 8;
+      argsBuffer.writeBigUInt64LE(BigInt(minimumTokenAmount), offset); // max_base_quantity (token amount)
+      offset += 8;
+      argsBuffer.writeBigUInt64LE(BigInt(amountInLamports), offset); // max_quote_quantity (SOL amount)
+      offset += 8;
+      argsBuffer.writeUInt8(0, offset); // order_type: 0 (market order)
+      offset += 1;
+      argsBuffer.writeBigUInt64LE(BigInt(Date.now()), offset); // client_order_id: timestamp
+      offset += 8;
+      argsBuffer.writeUInt16LE(0, offset); // limit: 0 (no limit)
       
-      // Derive Raydium pool accounts
-      const [poolStateAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('pool_state'), tokenMintKey.toBuffer()],
+      instructionData = Buffer.concat([
+        Buffer.from([20]), // Cook AMM variant index (SwapCookAMM)
+        argsBuffer
+      ]);
+      
+      console.log('🔍 Cook AMM instruction data:', {
+        variant: 20,
+        argsBufferLength: argsBuffer.length,
+        argsBufferHex: argsBuffer.toString('hex'),
+        totalLength: instructionData.length
+      });
+      
+      // Derive Cook AMM accounts
+      const [ammAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from('amm'), tokenMintKey.toBuffer()],
         PROGRAM_ID
       );
       
-      const [poolAuthorityAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('pool_authority'), tokenMintKey.toBuffer()],
-        PROGRAM_ID
-      );
+      // Fees account (ledger_wallet) - using devnet fees account
+      const feesAccount = new PublicKey('FxVpjJ5AGY6cfCwZQP5v8QBfS4J2NPa62HbGh1Fu2LpD');
       
-      // For SOL input, user's SOL account is the same as user key
+      // For Cook AMM swaps, we need the user's SOL account (same as user key for SOL)
       const userSolAccount = userKey;
-      
-      // Pool SOL account (AMM's SOL account)
-      const poolSolAccount = ammAccount;
-      
-      // Pool token account (AMM's token account)
-      const poolTokenAccount = await getAssociatedTokenAddress(tokenMintKey, ammAccount);
 
       // Debug: Check if accounts exist
       console.log('🔍 Checking account existence...');
@@ -266,10 +258,9 @@ export class TradingService {
         this.connection.getAccountInfo(tokenMintKey),
         this.connection.getAccountInfo(ammAccount),
         this.connection.getAccountInfo(userTokenAccount),
-        this.connection.getAccountInfo(launchDataAccount),
-        this.connection.getAccountInfo(poolStateAccount),
-        this.connection.getAccountInfo(poolAuthorityAccount),
-        this.connection.getAccountInfo(poolTokenAccount)
+        this.connection.getAccountInfo(userSolAccount),
+        this.connection.getAccountInfo(feesAccount),
+        this.connection.getAccountInfo(launchDataAccount)
       ]);
       
       console.log('🔍 Account Debug Info:', {
@@ -284,15 +275,13 @@ export class TradingService {
         userTokenAccount: userTokenAccount.toBase58(),
         userTokenAccountExists: !!accountChecks[3],
         userTokenAccountOwner: accountChecks[3]?.owner.toBase58(),
+        userSolAccount: userSolAccount.toBase58(),
+        userSolAccountExists: !!accountChecks[4],
+        feesAccount: feesAccount.toBase58(),
+        feesAccountExists: !!accountChecks[5],
         launchDataAccount: launchDataAccount.toBase58(),
-        launchDataAccountExists: !!accountChecks[4],
-        launchDataAccountOwner: accountChecks[4]?.owner.toBase58(),
-        poolStateAccount: poolStateAccount.toBase58(),
-        poolStateAccountExists: !!accountChecks[5],
-        poolAuthorityAccount: poolAuthorityAccount.toBase58(),
-        poolAuthorityAccountExists: !!accountChecks[6],
-        poolTokenAccount: poolTokenAccount.toBase58(),
-        poolTokenAccountExists: !!accountChecks[7],
+        launchDataAccountExists: !!accountChecks[6],
+        launchDataAccountOwner: accountChecks[6]?.owner.toBase58(),
         programId: PROGRAM_ID.toBase58(),
         instructionDataLength: instructionData.length,
         instructionDataHex: instructionData.toString('hex')
@@ -301,13 +290,12 @@ export class TradingService {
       const instruction = new TransactionInstruction({
         keys: [
           { pubkey: userKey, isSigner: true, isWritable: true },           // user (0)
-          { pubkey: poolStateAccount, isSigner: false, isWritable: true },  // pool_state (1)
-          { pubkey: poolAuthorityAccount, isSigner: false, isWritable: true }, // pool_authority (2)
-          { pubkey: userSolAccount, isSigner: false, isWritable: true },    // user_token_in (3) - SOL
-          { pubkey: userTokenAccount, isSigner: false, isWritable: true },  // user_token_out (4) - tokens
-          { pubkey: poolSolAccount, isSigner: false, isWritable: true },    // pool_token_in (5) - SOL
-          { pubkey: poolTokenAccount, isSigner: false, isWritable: true },  // pool_token_out (6) - tokens
-          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // token_program (7)
+          { pubkey: tokenMintKey, isSigner: false, isWritable: false },    // token_mint (1)
+          { pubkey: ammAccount, isSigner: false, isWritable: true },        // amm_account (2)
+          { pubkey: userTokenAccount, isSigner: false, isWritable: true }, // user_token_account (3)
+          { pubkey: userSolAccount, isSigner: false, isWritable: true },    // user_sol_account (4)
+          { pubkey: feesAccount, isSigner: false, isWritable: true },       // ledger_wallet (5)
+          { pubkey: launchDataAccount, isSigner: false, isWritable: false }, // launch_data (6) - optional
         ],
         programId: PROGRAM_ID,
         data: instructionData,

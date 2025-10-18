@@ -55,6 +55,8 @@ export interface RaffleData {
   volume24h: number;
   liquidity: number;
   holders: number;
+  baseTokenMint: string; // SPL token mint address
+  quoteTokenMint: string; // Quote token mint (usually SOL)
 }
 
 export class RaffleDataService {
@@ -164,6 +166,8 @@ export class RaffleDataService {
         volume24h: launchData.volume24h,
         liquidity: launchData.liquidity,
         holders: launchData.participants || 0,
+        baseTokenMint: launchData.baseTokenMint || raffleId, // Use actual SPL token mint or fallback to raffle account
+        quoteTokenMint: 'So11111111111111111111111111111111111111112', // SOL
       };
       
       return raffleData;

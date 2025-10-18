@@ -111,7 +111,13 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
   const fetchLaunchData = async () => {
       try {
         setLoading(true);
+        console.log('🔄 Fetching launch data for:', launchId);
         const launchData = await launchDataService.getLaunchById(launchId);
+        console.log('📊 Received launch data:', {
+          id: launchData?.id,
+          baseTokenMint: launchData?.baseTokenMint,
+          name: launchData?.name
+        });
         if (launchData) {
           setLaunch(launchData);
         
@@ -600,12 +606,12 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
                     <div className="flex items-center space-x-2 p-3 bg-slate-700/50 rounded-lg">
                       <span className="text-slate-400 text-sm">Contract:</span>
                       <code className="text-slate-300 font-mono text-sm flex-1">
-                        {launch.launchDataAccount}
+                        {launch.baseTokenMint}
                       </code>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => copyToClipboard(launch.launchDataAccount)}
+                        onClick={() => copyToClipboard(launch.baseTokenMint)}
                         className="text-slate-400 hover:text-white"
                       >
                         <Copy className="w-4 h-4" />

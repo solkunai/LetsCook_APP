@@ -1072,7 +1072,7 @@ function LaunchCard({
             </div>
           </div>
           <p className="text-gray-400 text-sm mt-2">{launch.symbol}</p>
-          <p className="text-gray-500 text-xs mt-1">CA: {launch.id.substring(0, 4)}...{launch.id.substring(launch.id.length - 4)}</p>
+          <p className="text-gray-500 text-xs mt-1">CA: {launch.baseTokenMint.substring(0, 4)}...{launch.baseTokenMint.substring(launch.baseTokenMint.length - 4)}</p>
         </div>
           </div>
 
@@ -1158,7 +1158,7 @@ function LaunchCard({
           className="p-3 bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg transition-all duration-300 border border-border hover:border-primary/50"
           onClick={(e) => {
             e.stopPropagation();
-            copyToClipboard(launch.id);
+            copyToClipboard(launch.baseTokenMint);
           }}
         >
           <ExternalLink className="w-4 h-4" />

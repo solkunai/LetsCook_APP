@@ -124,7 +124,7 @@ export class LaunchDataService {
           programId: launch.programId,
           listingAccount: launch.accountAddress,
           launchDataAccount: launch.accountAddress,
-          baseTokenMint: launch.id, // Simplified
+          baseTokenMint: launch.baseTokenMint || launch.id, // Use actual SPL token mint or fallback to launch account
           quoteTokenMint: 'So11111111111111111111111111111111111111112', // SOL
           dexProvider: 0, // CookDEX
           rawMetadata: launch.rawMetadata ? {
@@ -322,7 +322,7 @@ export class LaunchDataService {
         programId: blockchainLaunch.programId,
         listingAccount: blockchainLaunch.accountAddress,
         launchDataAccount: blockchainLaunch.accountAddress,
-        baseTokenMint: blockchainLaunch.id,
+        baseTokenMint: blockchainLaunch.baseTokenMint,
         quoteTokenMint: 'So11111111111111111111111111111111111111112',
         dexProvider: 0
       };

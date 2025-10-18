@@ -531,11 +531,11 @@ export default function RaffleDetailPage() {
                 <div className="text-white text-sm font-medium mb-2">Contract Address</div>
                 <div className="flex items-center space-x-3">
                   <code className="text-xs text-gray-200 font-mono bg-black/40 px-3 py-2 rounded-lg">
-                    {raffleData.id.slice(0, 8)}...{raffleData.id.slice(-8)}
+                    {raffleData.baseTokenMint.slice(0, 8)}...{raffleData.baseTokenMint.slice(-8)}
                   </code>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(raffleData.id);
+                      navigator.clipboard.writeText(raffleData.baseTokenMint);
                       toast({
                         title: "Copied!",
                         description: "Contract address copied to clipboard",
@@ -608,12 +608,12 @@ export default function RaffleDetailPage() {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm text-slate-400 mb-2">Contract Address</div>
                           <code className="text-sm text-white font-mono bg-slate-700 px-3 py-2 rounded break-all">
-                            {raffleData.id}
+                            {raffleData.baseTokenMint}
                           </code>
                         </div>
                         <button
                           onClick={() => {
-                            navigator.clipboard.writeText(raffleData.id);
+                            navigator.clipboard.writeText(raffleData.baseTokenMint);
                             toast({
                               title: "Copied!",
                               description: "Contract address copied to clipboard",

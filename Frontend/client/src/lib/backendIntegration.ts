@@ -452,7 +452,35 @@ export class BackendIntegration {
     const buffer3 = data.readBigUInt64LE(offset);
     offset += 8;
     
-    // Skip vectors for now (distribution, flags, strings, keys)
+    // Parse keys vector to find the actual SPL token mint
+    const keysVectorLength = data.readUInt32LE(offset);
+    offset += 4;
+    
+    let actualTokenMint = '';
+    for (let i = 0; i < keysVectorLength; i++) {
+      const keyLength = data.readUInt32LE(offset);
+      offset += 4;
+      const keyData = data.slice(offset, offset + keyLength);
+      offset += keyLength;
+      
+      // Try to parse as PublicKey to find valid SPL token mints
+      try {
+        const keyString = keyData.toString('utf8');
+        // Skip IPFS hashes and other non-PublicKey strings
+        if (keyString.length === 44 && !keyString.includes('bafkrei')) {
+          const publicKey = new PublicKey(keyString);
+          // Check if this is an SPL token mint by verifying it's a valid PublicKey
+          // For instant launches, the first valid PublicKey in keys is usually the token mint
+          if (!actualTokenMint) {
+            actualTokenMint = publicKey.toBase58();
+          }
+        }
+      } catch (e) {
+        // Not a valid PublicKey, continue
+      }
+    }
+    
+    // Skip remaining vectors for now (distribution, flags, strings)
     // These would need proper vector parsing
     
     // Parse creator (32 bytes)
@@ -500,7 +528,7 @@ export class BackendIntegration {
       programId: PROGRAM_IDS.MAIN_PROGRAM.toBase58(),
       listingAccount: listing,
       launchDataAccount: pubkey.toBase58(),
-      baseTokenMint: '', // Would need to parse from keys vector
+      baseTokenMint: actualTokenMint || pubkey.toBase58(), // Use actual SPL token mint or fallback to launch account
       quoteTokenMint: 'So11111111111111111111111111111111111111112',
       dexProvider: Number(buffer1),
     };
