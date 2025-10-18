@@ -587,7 +587,7 @@ export default function TradePage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {mockLiquidityPositions.map((position) => (
+                    {liquidityPositions.length > 0 ? liquidityPositions.map((position) => (
                       <div key={position.tokenSymbol} className="p-4 border rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
@@ -619,7 +619,13 @@ export default function TradePage() {
                           </Button>
                         </div>
                       </div>
-                    ))}
+                    )) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Coins className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No liquidity positions found</p>
+                        <p className="text-sm">Add liquidity to start earning rewards</p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -639,7 +645,7 @@ export default function TradePage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {mockMarketMakingRewards.map((reward) => (
+                  {marketMakingRewards.length > 0 ? marketMakingRewards.map((reward) => (
                     <div key={reward.tokenSymbol} className="flex items-center justify-between p-4 border rounded-lg">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center">
@@ -669,7 +675,13 @@ export default function TradePage() {
                         Claim
                       </Button>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Gift className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>No market making rewards available</p>
+                      <p className="text-sm">Provide liquidity to start earning rewards</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

@@ -324,7 +324,7 @@ export default function DebugPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 pt-24">
+    <div className="min-h-screen bg-background pt-24">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-4xl font-bold text-white mb-8 text-center">
@@ -374,7 +374,7 @@ export default function DebugPage() {
               <button
                 onClick={testOurProgram}
                 disabled={testing || !connected}
-                className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                className="bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-black px-6 py-3 rounded-lg font-semibold transition-colors"
               >
                 🚀 Test Our Program
               </button>

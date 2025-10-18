@@ -74,7 +74,7 @@ export default function BlockchainDebugPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="min-h-screen bg-background text-white p-8">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold mb-8">Blockchain Debug Page</h1>
         
@@ -102,7 +102,7 @@ export default function BlockchainDebugPage() {
               <button
                 onClick={checkAccountInitialization}
                 disabled={loading}
-                className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 px-4 py-2 rounded-lg font-medium"
+                className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 px-4 py-2 rounded-lg font-medium"
               >
                 {loading ? 'Checking...' : 'Check Account Initialization'}
               </button>

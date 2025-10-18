@@ -88,17 +88,14 @@ const LaunchesPage: React.FC = () => {
       filtered = filtered.filter(launch => launch.status === filterStatus);
     }
 
-    // IMPORTANT: Filter out non-graduated raffles from main launches page
-    // Raffles should only appear here after they graduate (become tradeable)
-    filtered = filtered.filter(launch => {
-      if (launch.launchType === 'raffle') {
-        // Only show raffles that have graduated (status === 'ended' or 'live')
-        // 'ended' means the raffle phase is complete and it's now tradeable
-        return launch.status === 'ended' || launch.status === 'live';
-      }
-      // Show all instant launches
-      return true;
-    });
+    // Show all launches for now (both instant and raffle)
+    // TODO: In production, you might want to filter raffles based on graduation status
+    // filtered = filtered.filter(launch => {
+    //   if (launch.launchType === 'raffle') {
+    //     return launch.status === 'ended' || launch.status === 'live';
+    //   }
+    //   return true;
+    // });
 
     // Sort launches
     filtered.sort((a, b) => {
@@ -328,7 +325,7 @@ const LaunchesPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-background">
       <Header />
       
       <div className="max-w-7xl mx-auto px-4 py-8">

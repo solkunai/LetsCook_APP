@@ -299,7 +299,8 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
           launch.baseTokenMint,
           publicKey.toBase58(),
           parseFloat(amount),
-          signTransaction
+          signTransaction,
+          dexProvider
         );
         
         if (result.success) {
@@ -315,7 +316,8 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
           launch.baseTokenMint,
           publicKey.toBase58(),
           parseFloat(amount),
-          signTransaction
+          signTransaction,
+          dexProvider
         );
         
         if (result.success) {
@@ -460,7 +462,7 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
         <Header />
         <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
@@ -474,7 +476,7 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
 
   if (error || !launch) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
         <Header />
         <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
@@ -492,7 +494,7 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
       <Header />
       
       {/* Hero Section */}
@@ -654,167 +656,286 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
                 </CardContent>
               </Card>
 
-              {/* Trading Panel */}
-              <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-                <CardHeader className="pb-4">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-xl text-white flex items-center">
-                      <ShoppingCart className="w-5 h-5 mr-2 text-yellow-400" />
-                      Trade {launch.symbol}
-                    </CardTitle>
+              {/* Modern Trading Panel */}
+              <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl border border-slate-700/50 p-8 shadow-2xl">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-gradient-to-r from-yellow-500 to-yellow-600 rounded-2xl flex items-center justify-center">
+                      <ShoppingCart className="w-6 h-6 text-slate-900" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold text-white">Trade {launch.symbol}</h2>
+                      <p className="text-slate-400">Buy and sell instantly</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Badge className="bg-green-500/20 text-green-400 border-green-500/30 px-4 py-2">
+                      <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+                      Live
+                    </Badge>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setShowTradingPanel(!showTradingPanel)}
+                      className="text-slate-400 hover:text-white p-2"
                     >
-                      {showTradingPanel ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      {showTradingPanel ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                     </Button>
                   </div>
-                </CardHeader>
+                </div>
 
-                <AnimatePresence>
-                  {showTradingPanel && (
-              <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.3 }}
+                {/* Trading Interface */}
+                <div className="space-y-6">
+                  {/* Buy/Sell Toggle */}
+                  <div className="flex bg-slate-800/50 rounded-2xl p-2">
+                    <button
+                      onClick={() => setTradingMode('buy')}
+                      className={`flex-1 flex items-center justify-center py-4 px-6 rounded-xl font-semibold text-lg transition-all ${
+                        tradingMode === 'buy'
+                          ? 'bg-green-600 text-white shadow-lg'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
                     >
-                      <CardContent className="pt-0">
-                        <Tabs value={tradingMode} onValueChange={(value) => setTradingMode(value as 'buy' | 'sell')}>
-                          <TabsList className="grid w-full grid-cols-2 bg-slate-700">
-                            <TabsTrigger 
-                              value="buy" 
-                              className={`${tradingMode === 'buy' ? 'bg-green-600 text-white' : 'text-slate-400'}`}
-                            >
-                              Buy
-                            </TabsTrigger>
-                            <TabsTrigger 
-                              value="sell"
-                              className={`${tradingMode === 'sell' ? 'bg-red-600 text-white' : 'text-slate-400'}`}
-                            >
-                              Sell
-                            </TabsTrigger>
-                          </TabsList>
-                          
-                          <div className="mt-6 space-y-4">
-                            <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <Label className="text-slate-300">
-                                  Amount ({tradingMode === 'buy' ? 'SOL' : launch.symbol})
-                                </Label>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={fetchQuote}
-                                  disabled={!amount || parseFloat(amount) <= 0}
-                                  className="text-slate-400 hover:text-white"
-                                >
-                                  <RefreshCw className="w-4 h-4" />
-                                </Button>
-                              </div>
-                              <Input
-                                type="number"
-                                placeholder={`Enter ${tradingMode === 'buy' ? 'SOL' : launch.symbol} amount`}
-                                value={amount}
-                                onChange={(e) => setAmount(e.target.value)}
-                                className="bg-slate-700 border-slate-600 text-white placeholder-slate-400"
-                              />
-                            </div>
-                            
-                            {/* Wallet Balance Display */}
-                            <div className="p-4 bg-slate-700/50 rounded-lg border border-blue-500/20">
-                              <div className="flex justify-between items-center mb-2">
-                                <span className="text-blue-400 font-semibold">Your Wallet</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={fetchWalletBalances}
-                                  disabled={balanceLoading}
-                                  className="text-blue-400 hover:text-white"
-                                >
-                                  <RefreshCw className={`w-4 h-4 ${balanceLoading ? 'animate-spin' : ''}`} />
-                                </Button>
-                              </div>
-                              <div className="flex justify-between items-center text-sm mb-2">
-                                <span className="text-slate-400">SOL Balance:</span>
-                                <span className="text-white font-semibold">
-                                  {balanceLoading ? 'Loading...' : publicKey ? `${solBalance.toFixed(4)} SOL` : 'Not connected'}
-                                </span>
-                              </div>
-                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-400">{launch.symbol} Balance:</span>
-                                <span className="text-white font-semibold">
-                                  {balanceLoading ? 'Loading...' : publicKey ? `${tokenBalance.toFixed(2)} ${launch.symbol}` : 'Not connected'}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Current Price Display */}
-                            <div className="p-4 bg-slate-700/50 rounded-lg">
-                              <div className="flex justify-between items-center mb-2">
-                                <span className="text-slate-400">Current Price:</span>
-                                <span className="text-white font-semibold">
-                                  {formatPrice(launch.currentPrice)} SOL
-                                </span>
-                              </div>
-                              <div className="flex justify-between items-center text-sm mb-2">
-                                <span className="text-slate-400">Market Cap:</span>
-                                <span className="text-slate-300">{formatVolume(launch.marketCap)}</span>
-                              </div>
-                              <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-400">Liquidity:</span>
-                                <span className="text-slate-300">{formatLiquidity(launch.liquidity)}</span>
-                              </div>
-                            </div>
-
-                            {/* Quote Display */}
-                            {quotePrice && estimatedOutput && amount && parseFloat(amount) > 0 && (
-                              <div className="p-4 bg-gradient-to-r from-slate-700/50 to-slate-600/50 rounded-lg border border-yellow-500/20">
-                                <div className="flex justify-between items-center mb-2">
-                                  <span className="text-slate-400">Estimated Output:</span>
-                                  <span className="text-yellow-400 font-semibold">
-                                    {estimatedOutput.toFixed(6)} {tradingMode === 'buy' ? launch.symbol : 'SOL'}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm mb-2">
-                                  <span className="text-slate-400">Effective Price:</span>
-                                  <span className="text-slate-300">{formatPrice(quotePrice)} SOL</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                  <span className="text-slate-400">Slippage:</span>
-                                  <span className="text-slate-300">
-                                    {((quotePrice - launch.currentPrice) / launch.currentPrice * 100).toFixed(2)}%
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-                            
-                            <Button
-                              onClick={handleTrade}
-                              disabled={!connected || !amount || tradingLoading}
-                              className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-slate-900 font-semibold"
-                            >
-                              {tradingLoading ? (
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              ) : (
-                                <ShoppingCart className="w-4 h-4 mr-2" />
-                              )}
-                              {tradingMode === 'buy' ? 'Buy' : 'Sell'} {launch.symbol}
-                            </Button>
-                            
-                            {!connected && (
-                              <p className="text-center text-slate-400 text-sm">
-                                Please connect your wallet to trade
-                      </p>
-                    )}
+                      <TrendingUp className="w-5 h-5 mr-2" />
+                      Buy
+                    </button>
+                    <button
+                      onClick={() => setTradingMode('sell')}
+                      className={`flex-1 flex items-center justify-center py-4 px-6 rounded-xl font-semibold text-lg transition-all ${
+                        tradingMode === 'sell'
+                          ? 'bg-red-600 text-white shadow-lg'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <TrendingDown className="w-5 h-5 mr-2" />
+                      Sell
+                    </button>
                   </div>
-                        </Tabs>
-                      </CardContent>
-                    </motion.div>
+
+                  {/* Amount Input */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-slate-300 font-medium text-lg">
+                        Amount ({tradingMode === 'buy' ? 'SOL' : launch.symbol})
+                      </label>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={fetchQuote}
+                        disabled={!amount || parseFloat(amount) <= 0}
+                        className="text-slate-400 hover:text-white p-2"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.000001"
+                        placeholder={`0.00 ${tradingMode === 'buy' ? 'SOL' : launch.symbol}`}
+                        value={amount}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '') {
+                            setAmount('');
+                            return;
+                          }
+                          const numericValue = parseFloat(value);
+                          if (!isNaN(numericValue) && numericValue >= 0) {
+                            setAmount(value);
+                          }
+                        }}
+                        className="w-full bg-slate-800/50 border border-slate-600 rounded-2xl text-white placeholder-slate-500 text-xl py-6 px-6 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 transition-all"
+                      />
+                      <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+                        <span className="text-slate-400 text-sm font-medium">
+                          {tradingMode === 'buy' ? 'SOL' : launch.symbol}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Quick Amount Buttons */}
+                    <div className="flex space-x-2">
+                      {tradingMode === 'buy' ? (
+                        <>
+                          <button
+                            onClick={() => setAmount((solBalance * 0.25).toFixed(4))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            25%
+                          </button>
+                          <button
+                            onClick={() => setAmount((solBalance * 0.5).toFixed(4))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            50%
+                          </button>
+                          <button
+                            onClick={() => setAmount((solBalance * 0.75).toFixed(4))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            75%
+                          </button>
+                          <button
+                            onClick={() => setAmount(solBalance.toFixed(4))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            Max
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setAmount((tokenBalance * 0.25).toFixed(2))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            25%
+                          </button>
+                          <button
+                            onClick={() => setAmount((tokenBalance * 0.5).toFixed(2))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            50%
+                          </button>
+                          <button
+                            onClick={() => setAmount((tokenBalance * 0.75).toFixed(2))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            75%
+                          </button>
+                          <button
+                            onClick={() => setAmount(tokenBalance.toFixed(2))}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+                          >
+                            Max
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Wallet Balances */}
+                  <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-2xl p-6 border border-blue-500/20">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-blue-400 font-semibold text-lg">Your Wallet</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={fetchWalletBalances}
+                        disabled={balanceLoading}
+                        className="text-blue-400 hover:text-white p-2"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${balanceLoading ? 'animate-spin' : ''}`} />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-slate-800/50 rounded-xl p-4">
+                        <div className="text-slate-400 text-sm mb-1">SOL Balance</div>
+                        <div className="text-white font-bold text-lg">
+                          {balanceLoading ? 'Loading...' : publicKey ? `${solBalance.toFixed(4)} SOL` : 'Not connected'}
+                        </div>
+                      </div>
+                      <div className="bg-slate-800/50 rounded-xl p-4">
+                        <div className="text-slate-400 text-sm mb-1">{launch.symbol} Balance</div>
+                        <div className="text-white font-bold text-lg">
+                          {balanceLoading ? 'Loading...' : publicKey ? `${tokenBalance.toFixed(2)} ${launch.symbol}` : 'Not connected'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Market Info */}
+                  <div className="bg-gradient-to-r from-slate-800/50 to-slate-700/50 rounded-2xl p-6">
+                    <h3 className="text-slate-300 font-semibold text-lg mb-4">Market Information</h3>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="text-center">
+                        <div className="text-slate-400 text-sm mb-1">Current Price</div>
+                        <div className="text-white font-bold text-xl">{formatPrice(launch.currentPrice)}</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-slate-400 text-sm mb-1">Market Cap</div>
+                        <div className="text-slate-300 font-semibold">{formatVolume(launch.marketCap)}</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-slate-400 text-sm mb-1">Liquidity</div>
+                        <div className="text-slate-300 font-semibold">{formatLiquidity(launch.liquidity)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quote Preview */}
+                  {quotePrice && estimatedOutput && amount && parseFloat(amount) > 0 && (
+                    <div className="bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-2xl p-6 border border-yellow-500/30">
+                      <h3 className="text-yellow-400 font-semibold text-lg mb-4">Trade Preview</h3>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400">You {tradingMode === 'buy' ? 'pay' : 'sell'}:</span>
+                          <span className="text-white font-bold text-lg">
+                            {amount} {tradingMode === 'buy' ? 'SOL' : launch.symbol}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400">You {tradingMode === 'buy' ? 'receive' : 'get'}:</span>
+                          <span className="text-yellow-400 font-bold text-xl">
+                            {estimatedOutput.toFixed(6)} {tradingMode === 'buy' ? launch.symbol : 'SOL'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-slate-400">Effective Price:</span>
+                          <span className="text-slate-300">{formatPrice(quotePrice)} SOL</span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-slate-400">Slippage:</span>
+                          <span className="text-slate-300">
+                            {((quotePrice - launch.currentPrice) / launch.currentPrice * 100).toFixed(2)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   )}
-                </AnimatePresence>
-              </Card>
+
+                  {/* Trade Button */}
+                  <button
+                    onClick={handleTrade}
+                    disabled={!connected || !amount || tradingLoading}
+                    className={`w-full py-6 px-8 rounded-2xl font-bold text-xl transition-all transform ${
+                      tradingMode === 'buy'
+                        ? 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white shadow-2xl hover:shadow-green-500/30'
+                        : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-2xl hover:shadow-red-500/30'
+                    } ${
+                      !connected || !amount || tradingLoading
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'hover:scale-105'
+                    }`}
+                  >
+                    {tradingLoading ? (
+                      <div className="flex items-center justify-center">
+                        <Loader2 className="w-6 h-6 mr-3 animate-spin" />
+                        Processing...
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center">
+                        {tradingMode === 'buy' ? (
+                          <TrendingUp className="w-6 h-6 mr-3" />
+                        ) : (
+                          <TrendingDown className="w-6 h-6 mr-3" />
+                        )}
+                        {tradingMode === 'buy' ? 'Buy' : 'Sell'} {launch.symbol}
+                      </div>
+                    )}
+                  </button>
+
+                  {!connected && (
+                    <div className="text-center p-4 bg-slate-800/50 rounded-xl">
+                      <p className="text-slate-400 text-lg">
+                        Please connect your wallet to start trading
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Price Chart */}
               <PriceChart 

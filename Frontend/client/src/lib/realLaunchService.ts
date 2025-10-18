@@ -43,9 +43,10 @@ export class RealLaunchService {
     tokenMint: string,
     userPublicKey: string,
     solAmount: number,
-    signTransaction?: (transaction: Transaction) => Promise<Transaction>
+    signTransaction?: (transaction: Transaction) => Promise<Transaction>,
+    dexProvider: 'cook' | 'raydium' = 'raydium'
   ): Promise<TradeResult> {
-    return tradingService.buyTokensAMM(tokenMint, userPublicKey, solAmount, signTransaction);
+    return tradingService.buyTokensAMM(tokenMint, userPublicKey, solAmount, signTransaction, dexProvider);
   }
 
   /**
@@ -55,9 +56,10 @@ export class RealLaunchService {
     tokenMint: string,
     userPublicKey: string,
     tokenAmount: number,
-    signTransaction?: (transaction: Transaction) => Promise<Transaction>
+    signTransaction?: (transaction: Transaction) => Promise<Transaction>,
+    dexProvider: 'cook' | 'raydium' = 'raydium'
   ): Promise<TradeResult> {
-    return tradingService.sellTokensAMM(tokenMint, userPublicKey, tokenAmount, signTransaction);
+    return tradingService.sellTokensAMM(tokenMint, userPublicKey, tokenAmount, signTransaction, dexProvider);
   }
 
   /**

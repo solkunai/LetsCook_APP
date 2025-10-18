@@ -431,7 +431,7 @@ export default function RaffleDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin text-purple-400 mx-auto mb-4" />
           <p className="text-slate-400">Loading raffle details...</p>
@@ -442,14 +442,14 @@ export default function RaffleDetailPage() {
 
   if (error || !raffleData) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background flex items-center justify-center">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-white mb-2">Raffle Not Found</h2>
           <p className="text-slate-400 mb-6">{error || 'The raffle you are looking for does not exist.'}</p>
           <button
             onClick={() => setLocation('/')}
-            className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-6 rounded-lg transition-colors"
+            className="bg-yellow-600 hover:bg-yellow-700 text-black font-medium py-3 px-6 rounded-lg transition-colors"
           >
             Go Home
           </button>
@@ -459,7 +459,7 @@ export default function RaffleDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
       <Header 
         title="Raffle Details"
         subtitle={`${raffleData.name} (${raffleData.symbol})`}
@@ -863,7 +863,7 @@ export default function RaffleDetailPage() {
                     <button
                       onClick={handleBuyTickets}
                       disabled={isBuyingTickets || !connected}
-                      className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center"
+                      className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed text-black font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center"
                     >
                       {isBuyingTickets ? (
                         <>

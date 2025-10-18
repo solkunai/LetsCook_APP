@@ -53,8 +53,13 @@ class MarketDataService {
       // Get real trading volume from recent transactions
       const volume24h = await this.getTradingVolume24h(tokenMint);
       
+      // Get real price from Jupiter API as backup
+      const jupiterPrice = await this.getJupiterPrice(tokenMint);
+      
+      // Use Jupiter price if AMM price seems off
+      const currentPrice = jupiterPrice && jupiterPrice > 0 ? jupiterPrice : ammData.price;
+      
       // Calculate real market data
-      const currentPrice = ammData.price;
       const marketCap = currentPrice * (totalSupply || 1000000); // Use actual total supply or default to 1M
       const liquidity = ammData.solReserves;
       
@@ -520,6 +525,55 @@ class MarketDataService {
     } catch (error) {
       console.error('Error calculating 7d price change:', error);
       return (Math.random() - 0.5) * 50;
+    }
+  }
+
+  // Get Jupiter API price for token
+  async getJupiterPrice(tokenMint: string): Promise<number | null> {
+    try {
+      console.log('🔍 Fetching Jupiter price for token:', tokenMint);
+      
+      // Jupiter API endpoint for price
+      const response = await fetch(`https://price.jup.ag/v4/price?ids=${tokenMint}`);
+      
+      if (!response.ok) {
+        throw new Error(`Jupiter API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.data && data.data[tokenMint]) {
+        const price = data.data[tokenMint].price;
+        console.log('✅ Jupiter price fetched:', price);
+        return price;
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('⚠️ Jupiter price fetch failed:', error);
+      return null;
+    }
+  }
+
+  // Get real price from multiple sources
+  async getRealPrice(tokenMint: string): Promise<number | null> {
+    try {
+      // Try Jupiter first (most reliable for price)
+      const jupiterPrice = await this.getJupiterPrice(tokenMint);
+      if (jupiterPrice && jupiterPrice > 0) {
+        return jupiterPrice;
+      }
+      
+      // Fallback to AMM data
+      const ammData = await this.getAMMAccountData(tokenMint);
+      if (ammData && ammData.price > 0) {
+        return ammData.price;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting real price:', error);
+      return null;
     }
   }
 

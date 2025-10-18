@@ -243,7 +243,7 @@ This shows the instruction is properly serialized for your native program.`);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-8">
+    <div className="min-h-screen bg-background p-8">
       <div className="max-w-4xl mx-auto">
         <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl">
           <h1 className="text-4xl font-bold text-white mb-2 text-center">
@@ -340,7 +340,7 @@ This shows the instruction is properly serialized for your native program.`);
               <button
                 onClick={handleHypeVote}
                 disabled={loading || !connected}
-                className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+                className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-black font-semibold py-3 px-4 rounded-lg transition-colors"
               >
                 {loading ? 'Voting...' : 'Submit Vote'}
               </button>

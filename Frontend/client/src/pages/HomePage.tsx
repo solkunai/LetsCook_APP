@@ -314,7 +314,7 @@ export default function HomePage() {
               <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
                 <Button 
                   size="lg" 
-                  className="group relative overflow-hidden bg-gradient-to-r from-purple-500 via-purple-600 to-purple-700 hover:from-purple-400 hover:via-purple-500 hover:to-purple-600 text-lg px-10 py-5 text-white font-bold shadow-2xl hover:shadow-purple-500/30 transition-all duration-500 border-2 border-purple-400 hover:border-purple-300 transform hover:scale-105 hover:-translate-y-1"
+                  className="group relative overflow-hidden bg-gradient-to-r from-yellow-500 via-yellow-600 to-yellow-700 hover:from-yellow-400 hover:via-yellow-500 hover:to-yellow-600 text-lg px-10 py-5 text-black font-bold shadow-2xl hover:shadow-yellow-500/30 transition-all duration-500 border-2 border-yellow-400 hover:border-yellow-300 transform hover:scale-105 hover:-translate-y-1"
                   onClick={() => setLocation('/create-raffle')}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
@@ -326,7 +326,7 @@ export default function HomePage() {
                 
                 <Button 
                   size="lg" 
-                  className="group relative overflow-hidden bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 hover:from-yellow-300 hover:via-yellow-400 hover:to-yellow-500 text-lg px-10 py-5 text-black font-bold shadow-2xl hover:shadow-yellow-500/30 transition-all duration-500 border-2 border-yellow-300 hover:border-yellow-200 transform hover:scale-105 hover:-translate-y-1"
+                  className="group relative overflow-hidden bg-white hover:bg-gray-100 text-lg px-10 py-5 text-black font-bold shadow-2xl hover:shadow-gray-500/30 transition-all duration-500 border-2 border-gray-300 hover:border-gray-400 transform hover:scale-105 hover:-translate-y-1"
                   onClick={() => setLocation('/create-launch')}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>

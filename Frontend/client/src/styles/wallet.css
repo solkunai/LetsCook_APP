@@ -1,7 +1,7 @@
 /* Wallet Adapter Button Customization */
 .wallet-adapter-button-custom {
-  background: linear-gradient(135deg, var(--electric-blue), var(--cosmic-purple)) !important;
-  color: var(--star-white) !important;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b) !important;
+  color: #000000 !important;
   font-family: var(--font-sans) !important;
   font-weight: 500 !important;
   padding: var(--space-3) var(--space-6) !important;

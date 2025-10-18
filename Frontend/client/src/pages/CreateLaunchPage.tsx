@@ -189,6 +189,21 @@ export default function EnhancedLaunchPage() {
     }
   };
 
+  // Helper function to handle number input changes
+  const handleNumberChange = (field: keyof FormData, value: string) => {
+    // Allow empty string for deletion
+    if (value === '') {
+      updateFormData(field, 0);
+      return;
+    }
+    
+    // Only allow numbers and decimal point
+    const numericValue = parseFloat(value);
+    if (!isNaN(numericValue) && numericValue >= 0) {
+      updateFormData(field, numericValue);
+    }
+  };
+
   // Image upload functions
   const handleImageUpload = async (file: File) => {
     if (file.size > 5 * 1024 * 1024) { // 5MB limit
@@ -608,7 +623,7 @@ export default function EnhancedLaunchPage() {
   // Success screen
   if (createdLaunchId && txSignature) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
         <Header 
           title="Launch Successful!"
           subtitle="Your token has been deployed"
@@ -762,7 +777,7 @@ export default function EnhancedLaunchPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
       <Header 
         title="Create Instant Launch"
         subtitle="Launch your token immediately on Solana"
@@ -1085,8 +1100,8 @@ export default function EnhancedLaunchPage() {
                     <input
                       type="number"
                       step="0.000001"
-                      value={formData.initialPrice}
-                      onChange={(e) => updateFormData('initialPrice', Number(e.target.value))}
+                      value={formData.initialPrice || ''}
+                      onChange={(e) => handleNumberChange('initialPrice', e.target.value)}
                       className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
                         errors.initialPrice ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                       }`}
@@ -1100,8 +1115,8 @@ export default function EnhancedLaunchPage() {
                     </label>
                     <input
                       type="number"
-                      value={formData.totalSupply}
-                      onChange={(e) => updateFormData('totalSupply', Number(e.target.value))}
+                      value={formData.totalSupply || ''}
+                      onChange={(e) => handleNumberChange('totalSupply', e.target.value)}
                       className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
                         errors.totalSupply ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                       }`}
@@ -1117,8 +1132,8 @@ export default function EnhancedLaunchPage() {
                       type="number"
                       min="0"
                       max="9"
-                      value={formData.decimals}
-                      onChange={(e) => updateFormData('decimals', Number(e.target.value))}
+                      value={formData.decimals || ''}
+                      onChange={(e) => handleNumberChange('decimals', e.target.value)}
                       className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
                         errors.decimals ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                       }`}
@@ -1133,8 +1148,8 @@ export default function EnhancedLaunchPage() {
                     <input
                       type="number"
                       step="0.001"
-                      value={formData.liquidityAmount}
-                      onChange={(e) => updateFormData('liquidityAmount', Number(e.target.value))}
+                      value={formData.liquidityAmount || ''}
+                      onChange={(e) => handleNumberChange('liquidityAmount', e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                       placeholder="0"
                     />
@@ -1155,8 +1170,8 @@ export default function EnhancedLaunchPage() {
                         </label>
                         <input
                           type="number"
-                          value={formData.liquidityTokenAmount || 0}
-                          onChange={(e) => updateFormData('liquidityTokenAmount', Number(e.target.value))}
+                          value={formData.liquidityTokenAmount || ''}
+                          onChange={(e) => handleNumberChange('liquidityTokenAmount', e.target.value)}
                           className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                           placeholder="0"
                         />
@@ -1180,8 +1195,8 @@ export default function EnhancedLaunchPage() {
                       <input
                         type="number"
                         step="0.001"
-                        value={formData.creatorPurchaseAmount || 0}
-                        onChange={(e) => updateFormData('creatorPurchaseAmount', Number(e.target.value))}
+                        value={formData.creatorPurchaseAmount || ''}
+                        onChange={(e) => handleNumberChange('creatorPurchaseAmount', e.target.value)}
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                         placeholder="0"
                       />
@@ -1343,7 +1358,7 @@ export default function EnhancedLaunchPage() {
                   )}
                 </div>
 
-                <div className="bg-purple-500/10 border border-yellow-500/20 rounded-lg p-4">
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
                   <div className="flex items-start">
                     <Info className="w-5 h-5 text-yellow-400 mr-3 mt-0.5 flex-shrink-0" />
                     <div className="text-sm text-yellow-200">
@@ -1384,7 +1399,7 @@ export default function EnhancedLaunchPage() {
             <button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="flex items-center px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105"
+              className="flex items-center px-8 py-3 bg-gradient-to-r from-yellow-600 to-yellow-700 text-black rounded-lg hover:from-yellow-700 hover:to-yellow-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105"
                 >
                   {isSubmitting ? (
                     <>

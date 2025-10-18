@@ -33,13 +33,17 @@ import { useLocation } from 'wouter';
 import { pinataService, uploadImageToIPFS } from '@/lib/pinataService';
 import { ipfsMetadataService } from '@/lib/ipfsMetadataService';
 import { toast } from '@/hooks/use-toast';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
+import { format } from 'date-fns';
+import * as borsh from 'borsh';
+import { Buffer } from 'buffer';
 import Header from '../components/Header';
 import DEXSelector from '../components/DEXSelector';
 import { realLaunchService } from '../lib/realLaunchService';
 import { PROGRAM_ID, LetsCookProgram, LaunchInstruction } from '../lib/nativeProgram';
 import { INSTRUCTION_DISCRIMINATORS } from '../lib/apiServices';
-import * as borsh from 'borsh';
-import { Buffer } from 'buffer';
 
 const STEPS = ['basic', 'dex', 'config', 'social', 'review'];
 
@@ -54,6 +58,8 @@ export default function CreateRafflePage() {
   const [txSignature, setTxSignature] = useState<string | null>(null);
   const [createdLaunchId, setCreatedLaunchId] = useState<string | null>(null);
   const [createdTokenMint, setCreatedTokenMint] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [durationMode, setDurationMode] = useState<'hours' | 'date'>('hours');
 
   // Connection to devnet with better timeout settings
   const connection = new Connection('https://api.devnet.solana.com', {
@@ -183,6 +189,46 @@ export default function CreateRafflePage() {
     if (errors[field]) {
       const { [field]: _, ...rest } = errors;
       setErrors(rest);
+    }
+  };
+
+  // Helper functions for duration conversion
+  const convertHoursToDate = (hours: number) => {
+    const now = new Date();
+    const endTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
+    return endTime;
+  };
+
+  const convertDateToHours = (date: Date) => {
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+  };
+
+  const updateDurationFromDate = (date: Date | undefined) => {
+    if (date) {
+      const hours = convertDateToHours(date);
+      updateFormData('raffleDuration', hours);
+    }
+  };
+
+  const updateDurationFromHours = (hours: number) => {
+    const date = convertHoursToDate(hours);
+    setEndDate(date);
+  };
+
+  // Helper function to handle number input changes
+  const handleNumberChange = (field: keyof RaffleFormData, value: string) => {
+    // Allow empty string for deletion
+    if (value === '') {
+      updateFormData(field, 0);
+      return;
+    }
+    
+    // Only allow numbers and decimal point
+    const numericValue = parseFloat(value);
+    if (!isNaN(numericValue) && numericValue >= 0) {
+      updateFormData(field, numericValue);
     }
   };
 
@@ -614,7 +660,8 @@ export default function CreateRafflePage() {
       teamAllocation: 20,
       marketingAllocation: 15,
       liquidityAllocation: 10,
-      treasuryAllocation: 5
+      treasuryAllocation: 5,
+      type: 'raffle'
     });
     setTxSignature(null);
     setErrors({});
@@ -622,14 +669,14 @@ export default function CreateRafflePage() {
 
   if (!connected) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           className="bg-slate-900 rounded-2xl border border-slate-800 p-8 max-w-md w-full text-center"
         >
-          <div className="w-16 h-16 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Ticket className="w-8 h-8 text-purple-400" />
+          <div className="w-16 h-16 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Ticket className="w-8 h-8 text-yellow-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Connect Your Wallet</h2>
           <p className="text-slate-400 mb-6">
@@ -637,7 +684,7 @@ export default function CreateRafflePage() {
           </p>
           <button
             onClick={() => {/* Wallet connection is handled by the wallet adapter */}}
-            className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-6 rounded-lg transition-colors"
+            className="w-full bg-yellow-600 hover:bg-yellow-700 text-black font-medium py-3 px-6 rounded-lg transition-colors"
           >
             Connect Wallet
           </button>
@@ -648,7 +695,7 @@ export default function CreateRafflePage() {
 
   if (txSignature) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-background flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -669,7 +716,7 @@ export default function CreateRafflePage() {
                 href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-purple-400 hover:text-purple-300 text-sm flex items-center"
+                className="text-yellow-400 hover:text-yellow-300 text-sm flex items-center"
               >
                 View <ExternalLink className="w-3 h-3 ml-1" />
               </a>
@@ -686,14 +733,14 @@ export default function CreateRafflePage() {
             </button>
             <button
               onClick={() => setLocation(`/raffle/${createdLaunchId}`)}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-6 rounded-lg transition-colors"
+              className="bg-yellow-600 hover:bg-yellow-700 text-black font-medium py-3 px-6 rounded-lg transition-colors"
             >
               View Raffle
             </button>
           </div>
           
-          <div className="mt-4 p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-            <p className="text-purple-300 text-sm mb-2">
+          <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+            <p className="text-yellow-300 text-sm mb-2">
               <Info className="w-4 h-4 inline mr-1" />
               Your raffle will appear on the raffles page shortly
             </p>
@@ -707,7 +754,7 @@ export default function CreateRafflePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
       <Header 
         title="Create Raffle"
         subtitle="Launch your token with fair distribution"
@@ -722,8 +769,8 @@ export default function CreateRafflePage() {
             className="text-center mb-8"
           >
             <div className="flex items-center justify-center mb-4">
-              <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center">
-                <Ticket className="w-6 h-6 text-purple-400" />
+            <div className="w-12 h-12 bg-yellow-500/20 rounded-full flex items-center justify-center">
+              <Ticket className="w-6 h-6 text-yellow-400" />
               </div>
             </div>
             <h1 className="text-4xl font-bold text-white mb-2">Create Raffle Launch</h1>
@@ -737,8 +784,8 @@ export default function CreateRafflePage() {
                 <div key={step} className="flex items-center flex-1">
                   <div className="flex flex-col items-center flex-1">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold transition-all ${
-                      index < currentStep ? 'bg-purple-600 text-white' :
-                      index === currentStep ? 'bg-purple-600 text-white ring-4 ring-purple-600/30' :
+                      index < currentStep ? 'bg-yellow-600 text-white' :
+                      index === currentStep ? 'bg-yellow-600 text-white ring-4 ring-yellow-600/30' :
                       'bg-slate-800 text-slate-500'
                     }`}>
                       {index < currentStep ? <CheckCircle2 className="w-5 h-5" /> : index + 1}
@@ -747,7 +794,7 @@ export default function CreateRafflePage() {
                   </div>
                   {index < STEPS.length - 1 && (
                     <div className={`h-1 flex-1 mx-2 rounded ${
-                      index < currentStep ? 'bg-purple-600' : 'bg-slate-800'
+                      index < currentStep ? 'bg-yellow-600' : 'bg-slate-800'
                     }`} />
                   )}
                 </div>
@@ -783,7 +830,7 @@ export default function CreateRafflePage() {
                         onChange={(e) => updateFormData('name', e.target.value)}
                         placeholder="My Awesome Token"
                         className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 ${
-                          errors.name ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
+                          errors.name ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
                       />
                       {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
@@ -800,7 +847,7 @@ export default function CreateRafflePage() {
                         placeholder="MAT"
                         maxLength={10}
                         className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 ${
-                          errors.symbol ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
+                          errors.symbol ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
                       />
                       {errors.symbol && <p className="text-red-400 text-xs mt-1">{errors.symbol}</p>}
@@ -818,7 +865,7 @@ export default function CreateRafflePage() {
                             value="raffle"
                             checked={formData.type === 'raffle'}
                             onChange={(e) => updateFormData('type', e.target.value as 'raffle')}
-                            className="mr-2 text-purple-500"
+                            className="mr-2 text-yellow-500"
                           />
                           <span className="text-slate-300">🎫 Raffle Launch</span>
                         </label>
@@ -829,7 +876,7 @@ export default function CreateRafflePage() {
                             value="instant"
                             checked={formData.type === 'instant'}
                             onChange={(e) => updateFormData('type', e.target.value as 'instant')}
-                            className="mr-2 text-purple-500"
+                            className="mr-2 text-yellow-500"
                           />
                           <span className="text-slate-300">⚡ Instant Launch</span>
                         </label>
@@ -847,7 +894,7 @@ export default function CreateRafflePage() {
                       placeholder="Describe your token and its purpose..."
                       rows={4}
                       className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 resize-none ${
-                        errors.description ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
+                        errors.description ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                       }`}
                     />
                     {errors.description && <p className="text-red-400 text-xs mt-1">{errors.description}</p>}
@@ -863,7 +910,7 @@ export default function CreateRafflePage() {
                         value={formData.totalSupply}
                         onChange={(e) => updateFormData('totalSupply', Number(e.target.value))}
                         className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                          errors.totalSupply ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
+                          errors.totalSupply ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
                       />
                       {errors.totalSupply && <p className="text-red-400 text-xs mt-1">{errors.totalSupply}</p>}
@@ -879,7 +926,7 @@ export default function CreateRafflePage() {
                         onChange={(e) => updateFormData('decimals', Number(e.target.value))}
                         min={0}
                         max={9}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                       />
                     </div>
                   </div>
@@ -914,7 +961,7 @@ export default function CreateRafflePage() {
                               <img 
                                 src={formData.image} 
                                 alt="Token Image" 
-                                className="w-32 h-32 rounded-lg object-cover mx-auto border-2 border-purple-500"
+                                className="w-32 h-32 rounded-lg object-cover mx-auto border-2 border-yellow-500"
                               />
                               <button
                                 onClick={removeImage}
@@ -924,7 +971,7 @@ export default function CreateRafflePage() {
                               </button>
                             </div>
                           ) : (
-                            <div className="w-32 h-32 border-2 border-dashed border-slate-600 rounded-lg flex flex-col items-center justify-center mx-auto hover:border-purple-500 transition-colors cursor-pointer">
+                            <div className="w-32 h-32 border-2 border-dashed border-slate-600 rounded-lg flex flex-col items-center justify-center mx-auto hover:border-yellow-500 transition-colors cursor-pointer">
                               <Image className="w-8 h-8 text-slate-400 mb-2" />
                               <span className="text-xs text-slate-400">Click to upload</span>
                             </div>
@@ -973,7 +1020,7 @@ export default function CreateRafflePage() {
                               <img 
                                 src={formData.banner} 
                                 alt="Banner Image" 
-                                className="w-48 h-24 rounded-lg object-cover mx-auto border-2 border-purple-500"
+                                className="w-48 h-24 rounded-lg object-cover mx-auto border-2 border-yellow-500"
                               />
                               <button
                                 onClick={() => updateFormData('banner', '')}
@@ -983,7 +1030,7 @@ export default function CreateRafflePage() {
                               </button>
                             </div>
                           ) : (
-                            <div className="w-48 h-24 border-2 border-dashed border-slate-600 rounded-lg flex flex-col items-center justify-center mx-auto hover:border-purple-500 transition-colors cursor-pointer">
+                            <div className="w-48 h-24 border-2 border-dashed border-slate-600 rounded-lg flex flex-col items-center justify-center mx-auto hover:border-yellow-500 transition-colors cursor-pointer">
                               <Image className="w-6 h-6 text-slate-400 mb-1" />
                               <span className="text-xs text-slate-400">Click to upload banner</span>
                             </div>
@@ -1033,12 +1080,12 @@ export default function CreateRafflePage() {
                     <p className="text-slate-400">Set up your raffle parameters</p>
                   </div>
 
-                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
                     <div className="flex items-start">
-                      <Info className="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-purple-200">
+                      <Info className="w-5 h-5 text-yellow-400 mr-3 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-yellow-200">
                         <p className="font-medium mb-1">Raffle Launch Benefits:</p>
-                        <ul className="space-y-1 text-purple-200/80">
+                        <ul className="space-y-1 text-yellow-200/80">
                           <li>• Fair distribution through ticket system</li>
                           <li>• Build community before launch</li>
                           <li>• Anti-bot protection built-in</li>
@@ -1053,15 +1100,16 @@ export default function CreateRafflePage() {
                       <label className="block text-sm font-medium text-slate-300 mb-2">
                         Ticket Price (SOL) *
                       </label>
-                      <input
-                        type="number"
-                        step="0.001"
-                        value={formData.ticketPrice}
-                        onChange={(e) => updateFormData('ticketPrice', Number(e.target.value))}
-                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                          errors.ticketPrice ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
-                        }`}
-                      />
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={formData.ticketPrice || ''}
+                          onChange={(e) => handleNumberChange('ticketPrice', e.target.value)}
+                          className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
+                            errors.ticketPrice ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
+                          }`}
+                          placeholder="0.1"
+                        />
                       {errors.ticketPrice && <p className="text-red-400 text-xs mt-1">{errors.ticketPrice}</p>}
                     </div>
 
@@ -1069,29 +1117,124 @@ export default function CreateRafflePage() {
                       <label className="block text-sm font-medium text-slate-300 mb-2">
                         Maximum Tickets *
                       </label>
-                      <input
-                        type="number"
-                        value={formData.maxTickets}
-                        onChange={(e) => updateFormData('maxTickets', Number(e.target.value))}
-                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                          errors.maxTickets ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
-                        }`}
-                      />
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          value={formData.maxTickets || ''}
+                          onChange={(e) => handleNumberChange('maxTickets', e.target.value)}
+                          className={`flex-1 bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
+                            errors.maxTickets ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
+                          }`}
+                          placeholder="Enter max tickets (0 for unlimited)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateFormData('maxTickets', 0)}
+                          className="px-4 py-3 bg-yellow-600 hover:bg-yellow-700 text-black rounded-lg transition-colors text-sm font-medium"
+                        >
+                          Unlimited
+                        </button>
+                      </div>
+                      <div className="mt-2 text-sm text-slate-400">
+                        {formData.maxTickets === 0 
+                          ? 'Unlimited tickets can be sold' 
+                          : `Maximum ${formData.maxTickets.toLocaleString()} tickets can be sold`
+                        }
+                      </div>
                       {errors.maxTickets && <p className="text-red-400 text-xs mt-1">{errors.maxTickets}</p>}
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-slate-300 mb-2">
-                        Duration (Hours) *
+                        Duration *
                       </label>
-                      <input
-                        type="number"
-                        value={formData.raffleDuration}
-                        onChange={(e) => updateFormData('raffleDuration', Number(e.target.value))}
-                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                          errors.raffleDuration ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
-                        }`}
-                      />
+                      
+                      {/* Duration Mode Toggle */}
+                      <div className="flex mb-3 bg-slate-800 rounded-lg p-1">
+                        <button
+                          type="button"
+                          onClick={() => setDurationMode('hours')}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                            durationMode === 'hours'
+                              ? 'bg-yellow-600 text-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <Clock className="w-4 h-4" />
+                          Hours
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDurationMode('date')}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                            durationMode === 'date'
+                              ? 'bg-yellow-600 text-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <Calendar className="w-4 h-4" />
+                          End Date
+                        </button>
+                      </div>
+
+                      {/* Hours Input */}
+                      {durationMode === 'hours' && (
+                        <input
+                          type="number"
+                          value={formData.raffleDuration || ''}
+                          onChange={(e) => {
+                            const hours = Number(e.target.value);
+                            handleNumberChange('raffleDuration', e.target.value);
+                            updateDurationFromHours(hours);
+                          }}
+                          className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
+                            errors.raffleDuration ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
+                          }`}
+                          placeholder="Enter duration in hours"
+                        />
+                      )}
+
+                      {/* Calendar Input */}
+                      {durationMode === 'date' && (
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={`w-full justify-start text-left font-normal bg-slate-800 border-slate-700 text-white hover:bg-slate-700 ${
+                                !endDate && 'text-slate-500'
+                              }`}
+                            >
+                              <Calendar className="mr-2 h-4 w-4" />
+                              {endDate ? format(endDate, "PPP") : "Pick end date"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0 bg-slate-900 border-slate-700">
+                            <CalendarComponent
+                              mode="single"
+                              selected={endDate}
+                              onSelect={(date) => {
+                                setEndDate(date);
+                                updateDurationFromDate(date);
+                              }}
+                              disabled={(date) => date < new Date()}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      )}
+
+                      {/* Duration Display */}
+                      {formData.raffleDuration > 0 && (
+                        <div className="mt-2 text-sm text-slate-400">
+                          {formData.raffleDuration} hours
+                          {endDate && (
+                            <span className="ml-2">
+                              (Ends: {format(endDate, "MMM dd, yyyy 'at' h:mm a")})
+                            </span>
+                          )}
+                        </div>
+                      )}
+
                       {errors.raffleDuration && <p className="text-red-400 text-xs mt-1">{errors.raffleDuration}</p>}
                     </div>
 
@@ -1101,13 +1244,50 @@ export default function CreateRafflePage() {
                       </label>
                       <input
                         type="number"
-                        value={formData.winnerCount}
-                        onChange={(e) => updateFormData('winnerCount', Number(e.target.value))}
+                        value={formData.winnerCount || ''}
+                        onChange={(e) => handleNumberChange('winnerCount', e.target.value)}
                         className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                          errors.winnerCount ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-purple-500'
+                          errors.winnerCount ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
+                        placeholder="100"
                       />
                       {errors.winnerCount && <p className="text-red-400 text-xs mt-1">{errors.winnerCount}</p>}
+                    </div>
+
+                    {/* Guaranteed Liquidity Threshold */}
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
+                      <div className="flex items-center mb-3">
+                        <Info className="w-5 h-5 text-yellow-400 mr-3 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm text-yellow-200">
+                          <strong>Guaranteed Liquidity Threshold</strong>
+                        </div>
+                      </div>
+                      <div className="text-sm text-yellow-200">
+                        <p className="mb-2">
+                          This raffle requires a minimum liquidity threshold to succeed:
+                        </p>
+                        <div className="bg-slate-800/50 rounded-lg p-3">
+                          <div className="flex justify-between items-center mb-1">
+                            <span>Winning Tickets:</span>
+                            <span className="font-semibold">{formData.winnerCount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between items-center mb-1">
+                            <span>Ticket Price:</span>
+                            <span className="font-semibold">{formData.ticketPrice} SOL</span>
+                          </div>
+                          <div className="border-t border-yellow-500/30 pt-2 mt-2">
+                            <div className="flex justify-between items-center">
+                              <span className="font-semibold">Required Liquidity:</span>
+                              <span className="font-bold text-yellow-400">
+                                {(formData.winnerCount * formData.ticketPrice).toFixed(2)} SOL
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-yellow-200/80">
+                          The raffle will only succeed if tickets worth at least this amount are sold.
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -1155,15 +1335,15 @@ export default function CreateRafflePage() {
                   {/* Tokenomics Section */}
                   <div className="mt-6">
                     <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5 text-purple-400" />
+                      <TrendingUp className="w-5 h-5 text-yellow-400" />
                       Tokenomics Distribution
                     </h3>
-                    <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
                       <div className="flex items-start">
-                        <Info className="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" />
-                        <div className="text-sm text-purple-200">
+                        <Info className="w-5 h-5 text-yellow-400 mr-3 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm text-yellow-200">
                           <p className="font-medium mb-1">Token Distribution Strategy:</p>
-                          <ul className="space-y-1 text-purple-200/80">
+                          <ul className="space-y-1 text-yellow-200/80">
                             <li>• Define how your tokens will be distributed</li>
                             <li>• Set aside tokens for different purposes</li>
                             <li>• Ensure fair and transparent allocation</li>
@@ -1184,7 +1364,7 @@ export default function CreateRafflePage() {
                           value={formData.winnersAllocation || 50}
                           onChange={(e) => updateFormData('winnersAllocation', Number(e.target.value))}
                           placeholder="50"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                         />
                         <p className="text-xs text-slate-500 mt-1">
                           Percentage of total supply for raffle winners
@@ -1201,7 +1381,7 @@ export default function CreateRafflePage() {
                           value={formData.teamAllocation || 20}
                           onChange={(e) => updateFormData('teamAllocation', Number(e.target.value))}
                           placeholder="20"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                         />
                         <p className="text-xs text-slate-500 mt-1">
                           Tokens reserved for team and development
@@ -1218,7 +1398,7 @@ export default function CreateRafflePage() {
                           value={formData.marketingAllocation || 15}
                           onChange={(e) => updateFormData('marketingAllocation', Number(e.target.value))}
                           placeholder="15"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                         />
                         <p className="text-xs text-slate-500 mt-1">
                           Tokens for marketing and community building
@@ -1235,7 +1415,7 @@ export default function CreateRafflePage() {
                           value={formData.liquidityAllocation || 10}
                           onChange={(e) => updateFormData('liquidityAllocation', Number(e.target.value))}
                           placeholder="10"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                         />
                         <p className="text-xs text-slate-500 mt-1">
                           Tokens for initial liquidity provision
@@ -1252,7 +1432,7 @@ export default function CreateRafflePage() {
                           value={formData.treasuryAllocation || 5}
                           onChange={(e) => updateFormData('treasuryAllocation', Number(e.target.value))}
                           placeholder="5"
-                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                         />
                         <p className="text-xs text-slate-500 mt-1">
                           Tokens held in treasury for future use
@@ -1318,7 +1498,7 @@ export default function CreateRafflePage() {
                         value={formData.website}
                         onChange={(e) => updateFormData('website', e.target.value)}
                         placeholder="https://yourwebsite.com"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500"
                       />
                     </div>
 
@@ -1332,7 +1512,7 @@ export default function CreateRafflePage() {
                         value={formData.twitter}
                         onChange={(e) => updateFormData('twitter', e.target.value)}
                         placeholder="https://twitter.com/yourhandle"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500"
                       />
                     </div>
 
@@ -1346,7 +1526,7 @@ export default function CreateRafflePage() {
                         value={formData.telegram}
                         onChange={(e) => updateFormData('telegram', e.target.value)}
                         placeholder="https://t.me/yourgroup"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500"
                       />
                     </div>
 
@@ -1360,7 +1540,7 @@ export default function CreateRafflePage() {
                         value={formData.discord}
                         onChange={(e) => updateFormData('discord', e.target.value)}
                         placeholder="https://discord.gg/yourserver"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500"
                       />
                     </div>
                   </div>
@@ -1421,12 +1601,12 @@ export default function CreateRafflePage() {
                     </div>
                   </div>
 
-                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
                     <div className="flex items-start">
-                      <Info className="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-purple-200">
+                      <Info className="w-5 h-5 text-yellow-400 mr-3 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-yellow-200">
                         <p className="font-medium mb-1">Launch Summary:</p>
-                        <ul className="space-y-1 text-purple-200/80">
+                        <ul className="space-y-1 text-yellow-200/80">
                           <li>• Raffle will run for {formData.raffleDuration} hours</li>
                           <li>• {formData.winnerCount} winners will be selected from {formData.maxTickets} tickets</li>
                           <li>• Each ticket costs {formData.ticketPrice} SOL</li>
@@ -1452,7 +1632,7 @@ export default function CreateRafflePage() {
                 {currentStep < STEPS.length - 1 ? (
                   <button
                     onClick={handleNext}
-                    className="flex items-center px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                    className="flex items-center px-6 py-3 bg-yellow-600 hover:bg-yellow-700 text-black rounded-lg transition-colors"
                   >
                     Next
                     <ArrowRight className="w-4 h-4 ml-2" />
@@ -1461,7 +1641,7 @@ export default function CreateRafflePage() {
                   <button
                     onClick={handleSubmit}
                     disabled={isSubmitting}
-                    className="flex items-center px-6 py-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                    className="flex items-center px-6 py-3 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-lg transition-colors"
                   >
                     {isSubmitting ? (
                       <>

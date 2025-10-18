@@ -83,7 +83,7 @@
 /* Custom Wallet Button Styles */
 @layer components {
   .wallet-adapter-button-custom {
-    @apply bg-primary text-primary-foreground border-0 rounded-lg px-4 py-2 font-semibold text-sm transition-all duration-200 shadow-sm cursor-pointer inline-flex items-center justify-center gap-2;
+    @apply bg-yellow-500 text-black border-0 rounded-lg px-4 py-2 font-semibold text-sm transition-all duration-200 shadow-sm cursor-pointer inline-flex items-center justify-center gap-2;
     background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
     box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
   }
