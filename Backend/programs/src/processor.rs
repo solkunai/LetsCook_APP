@@ -1145,11 +1145,53 @@ impl Processor {
             msg!("💰 Processing token purchase");
             
             let sol_amount = args.max_quote_quantity;
-            let fee_rate = 25;
+            let fee_rate = 25; // 0.25% fee (25 basis points)
             let fee_amount = (sol_amount * fee_rate) / 10000;
             let net_sol_amount = sol_amount - fee_amount;
             
-            let tokens_to_mint = ((net_sol_amount as f64) * 1000000.0).sqrt() as u64;
+            // Gentler bonding curve calculation
+            // Get current SOL in AMM pool to calculate price
+            let current_amm_sol = **amm_account.lamports.borrow();
+            
+            msg!("📊 Pool state before trade: {} lamports ({} SOL)", current_amm_sol, current_amm_sol / 1_000_000_000);
+            
+            // Gentle bonding curve: price increases slowly as pool grows
+            // Base rate: 1 SOL = 1000 tokens (constant for small pools)
+            // Only apply curve after significant liquidity (>50 SOL)
+            let pool_sol_f64 = current_amm_sol as f64;
+            let sol_in_f64 = net_sol_amount as f64;
+            
+            // Calculate tokens using gentler bonding curve
+            // Maintains ~1:1000 ratio until pool has significant liquidity
+            let base_rate = 1000.0; // 1 SOL = 1000 tokens
+            let curve_threshold = 50.0 * 1_000_000_000.0; // Start curving after 50 SOL
+            
+            let price_multiplier = if pool_sol_f64 > curve_threshold {
+                // After threshold, gradually increase price
+                // Every 50 SOL adds ~10% to price
+                let extra_sol = pool_sol_f64 - curve_threshold;
+                let price_increase = 1.0 + (extra_sol / (500.0 * 1_000_000_000.0));
+                1.0 / price_increase // Fewer tokens as price increases
+            } else {
+                1.0 // Full rate for early buys
+            };
+            
+            // Calculate tokens: (SOL / 1e9) * 1000 * 1e9 * multiplier
+            let tokens_to_mint = ((sol_in_f64 / 1_000_000_000.0) * base_rate * 1_000_000_000.0 * price_multiplier) as u64;
+            
+            // SLIPPAGE PROTECTION: Verify against minimum expected
+            let minimum_expected = args.max_base_quantity; // Frontend sets this
+            if tokens_to_mint < minimum_expected {
+                msg!("❌ Slippage too high! Expected: {} tokens, Got: {} tokens", minimum_expected, tokens_to_mint);
+                return Err(ProgramError::Custom(1)); // Slippage exceeded
+            }
+            
+            msg!("💰 Bonding curve buy:");
+            msg!("  SOL in: {} lamports ({} SOL)", net_sol_amount, net_sol_amount / 1_000_000_000);
+            msg!("  Pool before: {} lamports ({} SOL)", current_amm_sol, current_amm_sol / 1_000_000_000);
+            msg!("  Price multiplier: {:.6}", price_multiplier);
+            msg!("  Tokens out: {} ({} tokens)", tokens_to_mint, tokens_to_mint / 1_000_000_000);
+            msg!("  Effective rate: {:.2} tokens per SOL", (tokens_to_mint as f64 / sol_in_f64) * 1_000_000_000.0);
             
             let transfer_instruction = system_instruction::transfer(
                 user_sol_account.key,
@@ -1229,11 +1271,55 @@ impl Processor {
             msg!("💸 Processing token sale");
             
             let token_amount = args.max_base_quantity;
-            let fee_rate = 25;
+            let fee_rate = 25; // 0.25% fee (25 basis points)
             let fee_amount = (token_amount * fee_rate) / 10000;
             let net_token_amount = token_amount - fee_amount;
             
-            let sol_to_return = ((net_token_amount as f64) / 1000000.0).powi(2) as u64;
+            // Get current SOL in AMM pool
+            let current_amm_sol = **amm_account.lamports.borrow();
+            
+            msg!("📊 Pool state before sell: {} lamports ({} SOL)", current_amm_sol, current_amm_sol / 1_000_000_000);
+            
+            // Gentler inverse bonding curve for selling
+            let pool_sol_f64 = current_amm_sol as f64;
+            let tokens_in_f64 = net_token_amount as f64;
+            
+            // Use same curve as buying (inverse)
+            let base_rate = 1000.0; // 1000 tokens = 1 SOL
+            let curve_threshold = 50.0 * 1_000_000_000.0; // Same threshold as buying
+            
+            let price_multiplier = if pool_sol_f64 > curve_threshold {
+                // After threshold, price is higher (fewer tokens per SOL when buying)
+                // So when selling, you get less SOL per token
+                let extra_sol = pool_sol_f64 - curve_threshold;
+                let price_increase = 1.0 + (extra_sol / (500.0 * 1_000_000_000.0));
+                1.0 / price_increase
+            } else {
+                1.0 // Full rate for early sells
+            };
+            
+            // Calculate SOL: (tokens / 1e9) / 1000 * 1e9 * multiplier
+            let sol_to_return = ((tokens_in_f64 / 1_000_000_000.0) / base_rate * 1_000_000_000.0 * price_multiplier) as u64;
+            
+            // SLIPPAGE PROTECTION: Verify against minimum expected
+            let minimum_expected_sol = args.max_quote_quantity; // Frontend sets minimum SOL expected
+            if sol_to_return < minimum_expected_sol {
+                msg!("❌ Slippage too high! Expected: {} lamports, Got: {} lamports", minimum_expected_sol, sol_to_return);
+                return Err(ProgramError::Custom(1)); // Slippage exceeded
+            }
+            
+            // Verify AMM has enough SOL to return
+            if current_amm_sol < sol_to_return {
+                msg!("❌ Insufficient liquidity! Pool has: {} lamports, Need: {} lamports", current_amm_sol, sol_to_return);
+                return Err(ProgramError::InsufficientFunds);
+            }
+            
+            msg!("💸 Bonding curve sell:");
+            msg!("  Tokens in: {} ({} tokens)", net_token_amount, net_token_amount / 1_000_000_000);
+            msg!("  Pool before: {} lamports ({} SOL)", current_amm_sol, current_amm_sol / 1_000_000_000);
+            msg!("  Price multiplier: {:.6}", price_multiplier);
+            msg!("  SOL out: {} lamports ({} SOL)", sol_to_return, sol_to_return / 1_000_000_000);
+            msg!("  Effective rate: {:.2} SOL per 1000 tokens", (sol_to_return as f64 / tokens_in_f64) * 1000.0 * 1_000_000_000.0);
             
             let burn_instruction = token_instruction::burn(
                 &spl_token::ID,

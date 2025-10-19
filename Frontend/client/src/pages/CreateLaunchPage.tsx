@@ -38,6 +38,7 @@ import { LetsCookProgram, LaunchInstruction, PROGRAM_ID } from '@/lib/nativeProg
 import { realLaunchService } from '@/lib/realLaunchService';
 import { swapTokensRaydium, addLiquidityRaydium } from '@/lib/raydium';
 import { TokenVisibilityHelper, TokenMetadata } from '@/lib/tokenVisibilityHelper';
+import { MetaplexMetadataService } from '@/lib/metaplexMetadataService';
 
 const STEPS = ['basic', 'dex', 'config', 'social', 'review'];
 
@@ -429,6 +430,50 @@ export default function EnhancedLaunchPage() {
           TOKEN_PROGRAM_ID
         )
       );
+
+      // Create metadata JSON and upload to IPFS
+      console.log('📦 Creating token metadata JSON...');
+      const imageUrl = formData.image || '';
+      const metadataJson = {
+        name: formData.name,
+        symbol: formData.symbol,
+        description: formData.description || `${formData.name} - Launched on Let's Cook`,
+        image: imageUrl,
+        external_url: formData.website || '',
+        attributes: [],
+        properties: {
+          files: imageUrl ? [{
+            uri: imageUrl,
+            type: 'image/jpeg'
+          }] : [],
+          category: 'fungible',
+        }
+      };
+      
+      // Upload metadata JSON to IPFS using Pinata
+      let metadataUri = '';
+      try {
+        console.log('📤 Uploading metadata JSON to Pinata...');
+        const uploadResult = await pinataService.uploadJSON(metadataJson, `${formData.name}-metadata`);
+        metadataUri = `https://gateway.pinata.cloud/ipfs/${uploadResult.cid}`;
+        console.log('✅ Metadata JSON uploaded to IPFS:', metadataUri);
+      } catch (error) {
+        console.warn('⚠️ Failed to upload metadata JSON, using image URL as fallback:', error);
+        metadataUri = imageUrl;
+      }
+
+      // Add Metaplex metadata for the token (so wallets display it properly)
+      console.log('🏷️ Adding Metaplex metadata...');
+      await MetaplexMetadataService.createTokenMetadata(
+        connection,
+        baseTokenMintKeypair.publicKey,
+        publicKey, // update authority
+        formData.name,
+        formData.symbol,
+        metadataUri, // metadata URI (IPFS URL with JSON)
+        tokenMintTransaction
+      );
+      console.log('✅ Metadata instruction added');
 
       // Create quote token mint (SOL - wrapped SOL)
       const quoteTokenMintLamports = await getMinimumBalanceForRentExemptMint(connection);
