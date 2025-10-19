@@ -331,6 +331,37 @@ export class LaunchDataService {
       return null;
     }
   }
+
+  /**
+   * Find a launch by its token mint address
+   * This is useful for instant launches where we have the token mint but need the launch account
+   */
+  async getLaunchByTokenMint(tokenMint: string): Promise<LaunchData | null> {
+    try {
+      console.log('🔍 Searching for launch by token mint:', tokenMint);
+      
+      // Get all launches and find the one with matching token mint
+      const allLaunches = await this.getAllLaunches();
+      const matchingLaunch = allLaunches.find(launch => 
+        launch.baseTokenMint === tokenMint
+      );
+      
+      if (matchingLaunch) {
+        console.log('✅ Found launch by token mint:', {
+          tokenMint,
+          launchId: matchingLaunch.id,
+          launchDataAccount: matchingLaunch.launchDataAccount
+        });
+        return matchingLaunch;
+      } else {
+        console.log('❌ No launch found for token mint:', tokenMint);
+        return null;
+      }
+    } catch (error) {
+      console.error('Error finding launch by token mint:', error);
+      return null;
+    }
+  }
 }
 
 // Export a default instance

@@ -81,7 +81,7 @@ export default function Header({
               <div className="absolute -top-1 -right-1 w-2 h-2 md:w-3 md:h-3 bg-green-500 rounded-full animate-pulse"></div>
             </div>
             <div>
-              <h1 className="text-lg md:text-xl font-bold bg-gradient-to-r from-primary to-yellow-400 bg-clip-text text-transparent">
+              <h1 className="text-lg md:text-xl font-bold bg-gradient-to-r from-yellow-400 via-yellow-300 to-yellow-400 bg-clip-text text-transparent">
                 {title}
               </h1>
               <p className="text-xs text-muted-foreground hidden sm:block">{subtitle}</p>

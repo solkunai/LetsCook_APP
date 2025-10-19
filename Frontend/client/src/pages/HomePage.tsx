@@ -212,7 +212,7 @@ export default function HomePage() {
                 <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                <h1 className="text-xl font-bold bg-gradient-to-r from-yellow-400 via-yellow-300 to-yellow-400 bg-clip-text text-transparent">
                   Let's Cook
                 </h1>
                 <p className="text-xs text-muted-foreground">Solana Launchpad</p>
@@ -386,7 +386,7 @@ export default function HomePage() {
               className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-2xl mx-auto pt-8"
             >
               <StatCard 
-                number={loading ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${launches.reduce((sum, launch) => sum + launch.volume24h, 0) / 1000}K+`} 
+                number={loading ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${(launches.reduce((sum, launch) => sum + launch.volume24h, 0) / 1000).toFixed(2)}K+`} 
                 label="Total Volume" 
               />
               <StatCard 

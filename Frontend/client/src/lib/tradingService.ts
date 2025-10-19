@@ -1,6 +1,7 @@
 import { Connection, PublicKey, Transaction, SystemProgram, TransactionInstruction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { PROGRAM_ID } from './nativeProgram';
+import { launchDataService } from './launchDataService';
 
 // Standard Solana Associated Token Program ID
 const ASSOCIATED_TOKEN_PROGRAM_ID_STANDARD = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
@@ -27,40 +28,85 @@ export class TradingService {
     this.connection = connection;
   }
 
-  // Helper method to ensure token account exists
+  // Helper method to ensure token account exists - creates in SEPARATE transaction if needed
   private async ensureTokenAccountExists(
     tokenMint: PublicKey,
     userPublicKey: PublicKey,
-    transaction: Transaction
+    signTransaction: (transaction: Transaction) => Promise<Transaction>
   ): Promise<PublicKey> {
     const userTokenAccount = await getAssociatedTokenAddress(tokenMint, userPublicKey);
     
     try {
       const accountInfo = await this.connection.getAccountInfo(userTokenAccount);
       if (!accountInfo) {
-        console.log('🔄 Creating associated token account...');
-        // Create the associated token account (uses standard token program by default)
-        const createAccountInstruction = createAssociatedTokenAccountInstruction(
-          userPublicKey, // payer
-          userTokenAccount, // associatedToken
-          userPublicKey, // owner
-          tokenMint // mint
-        );
-        transaction.add(createAccountInstruction);
-        console.log('✅ Added token account creation instruction');
+        console.log('🔄 Token account does not exist. Creating in separate transaction...');
+        
+        try {
+          // Create ATA in a SEPARATE transaction
+          const ataTransaction = new Transaction();
+          const createAccountInstruction = createAssociatedTokenAccountInstruction(
+            userPublicKey, // payer
+            userTokenAccount, // associatedToken
+            userPublicKey, // owner
+            tokenMint // mint
+          );
+          ataTransaction.add(createAccountInstruction);
+          
+          // Get recent blockhash for ATA transaction
+          const { blockhash: ataBlockhash, lastValidBlockHeight: ataLastValidBlockHeight } = await this.connection.getLatestBlockhash();
+          ataTransaction.recentBlockhash = ataBlockhash;
+          ataTransaction.feePayer = userPublicKey;
+          
+          // Sign and send ATA creation transaction
+          console.log('📤 Sending ATA creation transaction...');
+          const signedAtaTransaction = await signTransaction(ataTransaction);
+          const ataSignature = await this.connection.sendRawTransaction(
+            signedAtaTransaction.serialize(),
+            {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed'
+            }
+          );
+          
+          console.log('✅ ATA creation transaction sent:', ataSignature);
+          
+          // Wait for ATA creation to confirm
+          await this.connection.confirmTransaction({
+            signature: ataSignature,
+            blockhash: ataBlockhash,
+            lastValidBlockHeight: ataLastValidBlockHeight
+          }, 'confirmed');
+          
+          console.log('✅ Token account created successfully');
+          
+          // Small delay to ensure state propagation
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Verify ATA was created
+          const ataAccountInfo = await this.connection.getAccountInfo(userTokenAccount);
+          if (!ataAccountInfo) {
+            throw new Error('ATA creation failed - account does not exist after confirmation');
+          }
+          console.log('✅ ATA verified on-chain:', {
+            address: userTokenAccount.toBase58(),
+            owner: ataAccountInfo.owner.toBase58()
+          });
+        } catch (ataError: any) {
+          // Check if ATA was already created (common race condition)
+          if (ataError.message && (ataError.message.includes('already been processed') || ataError.message.includes('already in use'))) {
+            console.log('⚠️ ATA creation was already processed or account already exists');
+            // Continue - ATA is now created
+          } else {
+            // Re-throw other errors
+            throw ataError;
+          }
+        }
       } else {
         console.log('✅ Token account already exists');
       }
     } catch (error) {
-      console.warn('Error checking token account, will attempt to create:', error);
-      // Add create instruction anyway
-      const createAccountInstruction = createAssociatedTokenAccountInstruction(
-        userPublicKey, // payer
-        userTokenAccount, // associatedToken
-        userPublicKey, // owner
-        tokenMint // mint
-      );
-      transaction.add(createAccountInstruction);
+      console.error('❌ Error ensuring token account exists:', error);
+      throw error;
     }
     
     return userTokenAccount;
@@ -181,22 +227,71 @@ export class TradingService {
       const minimumTokenAmount = Math.floor(solAmount * 1000 * 0.995); // 0.5% slippage tolerance
       
       // Derive the correct accounts for Cook AMM
-      const [launchDataAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('launch'), tokenMintKey.toBuffer()],
-        PROGRAM_ID
-      );
+      // For instant launches, we need to get the launch account from the token mint
+      // The launch data account is the original launch account, not derived from token mint
+      let launchDataAccount: PublicKey;
+      try {
+        // Try to get the launch account by searching for the token mint
+        console.log('🔍 Searching for launch with token mint:', tokenMintKey.toBase58());
+        const launchData = await launchDataService.getLaunchByTokenMint(tokenMintKey.toBase58());
+        if (launchData && launchData.launchDataAccount) {
+          launchDataAccount = new PublicKey(launchData.launchDataAccount);
+          console.log('✅ Found launch data account via token mint search:', launchDataAccount.toBase58());
+        } else {
+          // For instant launches, try to find the launch account by searching all launches
+          console.log('🔍 Token mint not found in launch data, searching all launches...');
+          const allLaunches = await launchDataService.getAllLaunches();
+          const matchingLaunch = allLaunches.find(launch => 
+            launch.baseTokenMint === tokenMintKey.toBase58() || 
+            launch.rawMetadata?.keys?.includes(tokenMintKey.toBase58())
+          );
+          
+          if (matchingLaunch && matchingLaunch.launchDataAccount) {
+            launchDataAccount = new PublicKey(matchingLaunch.launchDataAccount);
+            console.log('✅ Found launch data account via comprehensive search:', launchDataAccount.toBase58());
+          } else {
+            // Fallback: derive from token mint (this might not work for instant launches)
+            const [derivedLaunchAccount] = PublicKey.findProgramAddressSync(
+              [Buffer.from('launch'), tokenMintKey.toBuffer()],
+              PROGRAM_ID
+            );
+            launchDataAccount = derivedLaunchAccount;
+            console.log('⚠️ Using fallback launch data account:', launchDataAccount.toBase58());
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ Could not get launch data account, using fallback:', error);
+        const [derivedLaunchAccount] = PublicKey.findProgramAddressSync(
+          [Buffer.from('launch'), tokenMintKey.toBuffer()],
+          PROGRAM_ID
+        );
+        launchDataAccount = derivedLaunchAccount;
+      }
+      
+      console.log('🔍 Launch data account:', launchDataAccount.toBase58());
+      
+      // Check if launch data account exists
+      const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
+      console.log('🔍 Launch data account info:', {
+        exists: !!launchAccountInfo,
+        owner: launchAccountInfo?.owner.toBase58(),
+        dataLength: launchAccountInfo?.data.length
+      });
       
       // Create transaction
       const transaction = new Transaction();
       
       // Only create ATA if we have a real token mint
+      console.log('🔍 About to ensure token account exists. isRealTokenMint:', isRealTokenMint);
       let userTokenAccount: PublicKey;
       if (isRealTokenMint) {
+        console.log('✅ Calling ensureTokenAccountExists...');
         userTokenAccount = await this.ensureTokenAccountExists(
           tokenMintKey,
           userKey,
-          transaction
+          signTransaction
         );
+        console.log('✅ ensureTokenAccountExists completed. ATA:', userTokenAccount.toBase58());
       } else {
         // For non-SPL accounts, derive the ATA address but don't create it
         userTokenAccount = await getAssociatedTokenAddress(tokenMintKey, userKey);
@@ -209,30 +304,46 @@ export class TradingService {
       // Use Cook AMM instruction (variant 20) - this is what our program expects
       console.log('⚡ Using Cook AMM swap instruction');
       
-      // Cook AMM uses PlaceOrderArgs with all required fields
-      const argsBuffer = Buffer.alloc(44); // u8 + u64 + u64 + u64 + u8 + u64 + u16 = 1 + 8 + 8 + 8 + 1 + 8 + 2 = 36 bytes, padded to 44
+      // Cook AMM uses PlaceOrderArgs with proper Borsh serialization (Backend version)
+      // Structure: side(u8) + limit_price(u64) + max_base_quantity(u64) + max_quote_quantity(u64) + order_type(u8) + client_order_id(u64) + limit(u16)
+      const argsBuffer = Buffer.alloc(36); // Exact size: 1 + 8 + 8 + 8 + 1 + 8 + 2 = 36 bytes
       let offset = 0;
-      argsBuffer.writeUInt8(0, offset); // side: 0 = buy, 1 = sell
+      
+      // Write side (u8): 0 = buy, 1 = sell
+      argsBuffer.writeUInt8(0, offset);
       offset += 1;
-      argsBuffer.writeBigUInt64LE(BigInt(0), offset); // limit_price: 0 (market order)
+      
+      // Write limit_price (u64): 0 for market order
+      argsBuffer.writeBigUInt64LE(BigInt(0), offset);
       offset += 8;
-      argsBuffer.writeBigUInt64LE(BigInt(minimumTokenAmount), offset); // max_base_quantity (token amount)
+      
+      // Write max_base_quantity (u64): minimum token amount expected
+      argsBuffer.writeBigUInt64LE(BigInt(minimumTokenAmount), offset);
       offset += 8;
-      argsBuffer.writeBigUInt64LE(BigInt(amountInLamports), offset); // max_quote_quantity (SOL amount)
+      
+      // Write max_quote_quantity (u64): SOL amount to spend
+      argsBuffer.writeBigUInt64LE(BigInt(amountInLamports), offset);
       offset += 8;
-      argsBuffer.writeUInt8(0, offset); // order_type: 0 (market order)
+      
+      // Write order_type (u8): 0 = market order
+      argsBuffer.writeUInt8(0, offset);
       offset += 1;
-      argsBuffer.writeBigUInt64LE(BigInt(Date.now()), offset); // client_order_id: timestamp
+      
+      // Write client_order_id (u64): unique identifier
+      argsBuffer.writeBigUInt64LE(BigInt(Date.now()), offset);
       offset += 8;
-      argsBuffer.writeUInt16LE(0, offset); // limit: 0 (no limit)
+      
+      // Write limit (u16): 0 = no limit
+      argsBuffer.writeUInt16LE(0, offset);
+      offset += 2;
       
       instructionData = Buffer.concat([
-        Buffer.from([20]), // Cook AMM variant index (SwapCookAMM)
+        Buffer.from([10]), // Cook AMM variant index (SwapCookAMM) - 10th variant (0-indexed)
         argsBuffer
       ]);
       
       console.log('🔍 Cook AMM instruction data:', {
-        variant: 20,
+        variant: 10,
         argsBufferLength: argsBuffer.length,
         argsBufferHex: argsBuffer.toString('hex'),
         totalLength: instructionData.length
@@ -263,6 +374,23 @@ export class TradingService {
         this.connection.getAccountInfo(launchDataAccount)
       ]);
       
+      // Create instruction keys according to Backend SwapCookAMM account structure
+      const instructionKeys = [
+        { pubkey: userKey, isSigner: true, isWritable: true },        // user (0)
+        { pubkey: tokenMintKey, isSigner: false, isWritable: true }, // token_mint (1) - MUST be writable for minting
+        { pubkey: ammAccount, isSigner: false, isWritable: true },    // amm_account (2)
+        { pubkey: userTokenAccount, isSigner: false, isWritable: true }, // user_token_account (3)
+        { pubkey: userSolAccount, isSigner: false, isWritable: true }, // user_sol_account (4)
+        { pubkey: feesAccount, isSigner: false, isWritable: true },   // ledger_wallet (5) - needs to be writable to receive fees
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program (6)
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // token_program (7) - REQUIRED for mint_to CPI
+      ];
+      
+      // Only add launch data account if it exists (optional 9th account)
+      if (launchAccountInfo) {
+        instructionKeys.push({ pubkey: launchDataAccount, isSigner: false, isWritable: false }); // launch_data (8) - optional
+      }
+
       console.log('🔍 Account Debug Info:', {
         userKey: userKey.toBase58(),
         userKeyExists: !!accountChecks[0],
@@ -280,23 +408,100 @@ export class TradingService {
         feesAccount: feesAccount.toBase58(),
         feesAccountExists: !!accountChecks[5],
         launchDataAccount: launchDataAccount.toBase58(),
-        launchDataAccountExists: !!accountChecks[6],
-        launchDataAccountOwner: accountChecks[6]?.owner.toBase58(),
+        launchDataAccountExists: !!launchAccountInfo,
+        launchDataAccountOwner: launchAccountInfo?.owner.toBase58(),
+        instructionKeysCount: instructionKeys.length,
         programId: PROGRAM_ID.toBase58(),
         instructionDataLength: instructionData.length,
         instructionDataHex: instructionData.toString('hex')
       });
 
+      // Check each account individually and log detailed info
+      console.log('🔍 Detailed Account Check:');
+      instructionKeys.forEach((account, index) => {
+        console.log(`Account ${index}:`, {
+          pubkey: account.pubkey.toBase58(),
+          isSigner: account.isSigner,
+          isWritable: account.isWritable,
+          exists: index < accountChecks.length ? !!accountChecks[index] : 'not checked'
+        });
+      });
+
+      // Check if AMM account is properly derived
+      const [expectedAmmAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from('amm'), tokenMintKey.toBuffer()],
+        PROGRAM_ID
+      );
+      console.log('🔍 AMM Account Verification:', {
+        derivedAmmAccount: expectedAmmAccount.toBase58(),
+        usedAmmAccount: ammAccount.toBase58(),
+        accountsMatch: expectedAmmAccount.equals(ammAccount),
+        ammAccountExists: !!accountChecks[2]
+      });
+
+      // If AMM account doesn't exist, initialize it first IN A SEPARATE TRANSACTION
+      if (!accountChecks[2]) {
+        console.log('⚠️ AMM account does not exist. Initializing AMM first...');
+        
+        try {
+          // Create a separate transaction for AMM initialization
+          const initTransaction = new Transaction();
+          await this.initializeAMMAccount(userKey, tokenMintKey, ammAccount, initTransaction);
+          
+          // Get recent blockhash for init transaction
+          const { blockhash: initBlockhash, lastValidBlockHeight: initLastValidBlockHeight } = await this.connection.getLatestBlockhash();
+          initTransaction.recentBlockhash = initBlockhash;
+          initTransaction.feePayer = userKey;
+          
+          // Sign and send init transaction
+          console.log('📤 Sending AMM initialization transaction...');
+          const signedInitTransaction = await signTransaction(initTransaction);
+          const initSignature = await this.connection.sendRawTransaction(
+            signedInitTransaction.serialize(),
+            {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed'
+            }
+          );
+          
+          console.log('✅ AMM initialization transaction sent:', initSignature);
+          
+          // Wait for initialization to confirm
+          await this.connection.confirmTransaction({
+            signature: initSignature,
+            blockhash: initBlockhash,
+            lastValidBlockHeight: initLastValidBlockHeight
+          }, 'confirmed');
+          
+          console.log('✅ AMM account initialized successfully');
+          
+          // Small delay to ensure state propagation
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Verify AMM account was created
+          const ammAccountInfo = await this.connection.getAccountInfo(ammAccount);
+          if (!ammAccountInfo) {
+            throw new Error('AMM account initialization failed - account does not exist after confirmation');
+          }
+          console.log('✅ AMM account verified on-chain:', {
+            address: ammAccount.toBase58(),
+            owner: ammAccountInfo.owner.toBase58(),
+            dataLength: ammAccountInfo.data.length
+          });
+        } catch (initError: any) {
+          // Check if AMM was already initialized (common race condition)
+          if (initError.message && initError.message.includes('already been processed')) {
+            console.log('⚠️ AMM initialization was already processed (may have been initialized by another transaction)');
+            // Continue with swap - AMM is now initialized
+          } else {
+            // Re-throw other errors
+            throw initError;
+          }
+        }
+      }
+
       const instruction = new TransactionInstruction({
-        keys: [
-          { pubkey: userKey, isSigner: true, isWritable: true },           // user (0)
-          { pubkey: tokenMintKey, isSigner: false, isWritable: false },    // token_mint (1)
-          { pubkey: ammAccount, isSigner: false, isWritable: true },        // amm_account (2)
-          { pubkey: userTokenAccount, isSigner: false, isWritable: true }, // user_token_account (3)
-          { pubkey: userSolAccount, isSigner: false, isWritable: true },    // user_sol_account (4)
-          { pubkey: feesAccount, isSigner: false, isWritable: true },       // ledger_wallet (5)
-          { pubkey: launchDataAccount, isSigner: false, isWritable: false }, // launch_data (6) - optional
-        ],
+        keys: instructionKeys,
         programId: PROGRAM_ID,
         data: instructionData,
       });
@@ -309,13 +514,33 @@ export class TradingService {
       transaction.feePayer = userKey;
       
       // Simulate transaction before sending
-      console.log('🧪 Simulating transaction...');
+      console.log('🧪 Simulating SWAP transaction...');
+      console.log('🔍 Transaction has', transaction.instructions.length, 'instruction(s)');
       const simResult = await this.connection.simulateTransaction(transaction);
       if (simResult.value.err) {
         console.error('❌ Simulation failed:', simResult.value.err);
-        throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        console.error('❌ Simulation logs:', simResult.value.logs);
+        
+        // Check for specific error types and provide better error messages
+        if (simResult.value.err && typeof simResult.value.err === 'object' && 'InstructionError' in simResult.value.err) {
+          const instructionError = simResult.value.err as any;
+          const [instructionIndex, error] = instructionError.InstructionError;
+          
+          console.error(`❌ Failed at instruction ${instructionIndex}:`, error);
+          
+          if (error === 'BorshIoError') {
+            throw new Error(`Transaction simulation failed: BorshIoError in instruction ${instructionIndex}. This usually means incorrect data serialization.`);
+          } else if (error === 'AccountNotFound' || error === 'MissingAccount') {
+            throw new Error(`Transaction simulation failed: ${error} in instruction ${instructionIndex}. Check simulation logs above for details.`);
+          } else {
+            throw new Error(`Transaction simulation failed: ${error} in instruction ${instructionIndex}`);
+          }
+        } else {
+          throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        }
       }
       console.log('✅ Simulation successful');
+      console.log('📊 Simulation logs:', simResult.value.logs);
       
       console.log('📤 Sending instant swap transaction...');
       
@@ -410,7 +635,7 @@ export class TradingService {
         userTokenAccount = await this.ensureTokenAccountExists(
           tokenMintKey,
           userKey,
-          transaction
+          signTransaction
         );
       } else {
         // For non-SPL accounts, derive the ATA address but don't create it
@@ -473,7 +698,21 @@ export class TradingService {
       const simResult = await this.connection.simulateTransaction(transaction);
       if (simResult.value.err) {
         console.error('❌ Simulation failed:', simResult.value.err);
-        throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        
+        // Check for specific error types and provide better error messages
+        if (simResult.value.err && typeof simResult.value.err === 'object' && 'InstructionError' in simResult.value.err) {
+          const instructionError = simResult.value.err as any;
+          const [instructionIndex, error] = instructionError.InstructionError;
+          if (error === 'BorshIoError') {
+            throw new Error(`Transaction simulation failed: BorshIoError in instruction ${instructionIndex}. This usually means incorrect data serialization.`);
+          } else if (error === 'AccountNotFound') {
+            throw new Error(`Transaction simulation failed: Account not found in instruction ${instructionIndex}. Please check if all required accounts exist.`);
+          } else {
+            throw new Error(`Transaction simulation failed: ${error} in instruction ${instructionIndex}`);
+          }
+        } else {
+          throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        }
       }
       console.log('✅ Simulation successful');
       
@@ -612,7 +851,21 @@ export class TradingService {
       const simResult = await this.connection.simulateTransaction(transaction);
       if (simResult.value.err) {
         console.error('❌ Simulation failed:', simResult.value.err);
-        throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        
+        // Check for specific error types and provide better error messages
+        if (simResult.value.err && typeof simResult.value.err === 'object' && 'InstructionError' in simResult.value.err) {
+          const instructionError = simResult.value.err as any;
+          const [instructionIndex, error] = instructionError.InstructionError;
+          if (error === 'BorshIoError') {
+            throw new Error(`Transaction simulation failed: BorshIoError in instruction ${instructionIndex}. This usually means incorrect data serialization.`);
+          } else if (error === 'AccountNotFound') {
+            throw new Error(`Transaction simulation failed: Account not found in instruction ${instructionIndex}. Please check if all required accounts exist.`);
+          } else {
+            throw new Error(`Transaction simulation failed: ${error} in instruction ${instructionIndex}`);
+          }
+        } else {
+          throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        }
       }
       console.log('✅ Simulation successful');
       
@@ -716,7 +969,21 @@ export class TradingService {
       const simResult = await this.connection.simulateTransaction(transaction);
       if (simResult.value.err) {
         console.error('❌ Simulation failed:', simResult.value.err);
-        throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        
+        // Check for specific error types and provide better error messages
+        if (simResult.value.err && typeof simResult.value.err === 'object' && 'InstructionError' in simResult.value.err) {
+          const instructionError = simResult.value.err as any;
+          const [instructionIndex, error] = instructionError.InstructionError;
+          if (error === 'BorshIoError') {
+            throw new Error(`Transaction simulation failed: BorshIoError in instruction ${instructionIndex}. This usually means incorrect data serialization.`);
+          } else if (error === 'AccountNotFound') {
+            throw new Error(`Transaction simulation failed: Account not found in instruction ${instructionIndex}. Please check if all required accounts exist.`);
+          } else {
+            throw new Error(`Transaction simulation failed: ${error} in instruction ${instructionIndex}`);
+          }
+        } else {
+          throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+        }
       }
       console.log('✅ Simulation successful');
       
@@ -1052,6 +1319,33 @@ export class TradingService {
     // They only contain characters: 1-9, A-H, J-N, P-Z, a-k, m-z (no 0, O, I, l)
     const base58Pattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
     return base58Pattern.test(address);
+  }
+
+  /**
+   * Initialize AMM account for instant launches
+   */
+  private async initializeAMMAccount(
+    userKey: PublicKey,
+    tokenMintKey: PublicKey,
+    ammAccount: PublicKey,
+    transaction: Transaction
+  ): Promise<void> {
+    console.log('🚀 Initializing AMM account...');
+    
+    // Create InitCookAMM instruction
+    const initAMMInstruction = new TransactionInstruction({
+      keys: [
+        { pubkey: userKey, isSigner: true, isWritable: true },        // user (0)
+        { pubkey: tokenMintKey, isSigner: false, isWritable: false }, // token_mint (1)
+        { pubkey: ammAccount, isSigner: false, isWritable: true },    // amm_account (2)
+        { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false }, // system_program (3)
+      ],
+      programId: PROGRAM_ID,
+      data: Buffer.from([4]), // InitCookAMM discriminator (5th variant, 0-indexed)
+    });
+    
+    transaction.add(initAMMInstruction);
+    console.log('✅ InitCookAMM instruction added to transaction');
   }
 
   /**

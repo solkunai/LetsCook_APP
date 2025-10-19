@@ -1189,18 +1189,38 @@ impl Processor {
                 &spl_token::ID,
                 token_mint.key,
                 user_token_account.key,
-                program_id,
+                amm_account.key,  // AMM PDA is the mint authority
                 &[],
                 tokens_to_mint,
             )?;
             
+            // Get token program from accounts (should be at index 7)
+            let token_program = if accounts.len() > 7 {
+                &accounts[7]
+            } else {
+                msg!("❌ Error: Token Program account missing. Accounts length: {}", accounts.len());
+                return Err(ProgramError::NotEnoughAccountKeys);
+            };
+            
+            // Validate it's actually the Token Program
+            if token_program.key != &spl_token::ID {
+                msg!("❌ Error: Invalid Token Program. Expected: {}, Got: {}", spl_token::ID, token_program.key);
+                return Err(ProgramError::IncorrectProgramId);
+            }
+            
+            msg!("✅ Token Program validated: {}", token_program.key);
+            
+            // For mint_to, we need: mint, destination, authority, [token_program]
+            // The AMM account is the mint authority (it's a PDA that can sign)
             invoke_signed(
                 &mint_instruction,
                 &[
-                    token_mint.clone(),
-                    user_token_account.clone(),
+                    token_mint.clone(),           // mint account
+                    user_token_account.clone(),   // destination account
+                    amm_account.clone(),          // mint authority (AMM PDA)
+                    token_program.clone(),        // token program
                 ],
-                &[&[b"amm", token_mint.key.as_ref(), &[bump_seed]]],
+                &[&[b"amm", token_mint.key.as_ref(), &[bump_seed]]],  // seeds for AMM PDA
             )?;
             
             msg!("✅ Token purchase completed successfully");
@@ -1224,11 +1244,20 @@ impl Processor {
                 net_token_amount,
             )?;
             
+            // Get token program from accounts (should be at index 7)
+            let token_program = if accounts.len() > 7 {
+                &accounts[7]
+            } else {
+                msg!("❌ Error: Token Program account missing");
+                return Err(ProgramError::NotEnoughAccountKeys);
+            };
+            
             invoke_signed(
                 &burn_instruction,
                 &[
                     user_token_account.clone(),
                     token_mint.clone(),
+                    token_program.clone(),  // REQUIRED for burn CPI
                 ],
                 &[],
             )?;
@@ -1264,6 +1293,7 @@ impl Processor {
                     &[
                         user_token_account.clone(),
                         token_mint.clone(),
+                        token_program.clone(),  // REQUIRED for burn CPI
                     ],
                     &[],
                 )?;

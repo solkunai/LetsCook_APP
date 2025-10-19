@@ -412,12 +412,19 @@ export default function EnhancedLaunchPage() {
         })
       );
 
-      // Initialize base token mint
+      // Derive AMM PDA to use as mint authority
+      const [ammPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('amm'), baseTokenMintKeypair.publicKey.toBuffer()],
+        PROGRAM_ID
+      );
+      console.log('🔍 AMM PDA (mint authority):', ammPDA.toBase58());
+
+      // Initialize base token mint with AMM PDA as mint authority
       tokenMintTransaction.add(
         createInitializeMintInstruction(
           baseTokenMintKeypair.publicKey, // mint
           formData.decimals, // decimals
-          publicKey, // mint authority (user)
+          ammPDA, // mint authority (AMM PDA) - CRITICAL FIX!
           publicKey, // freeze authority (user)
           TOKEN_PROGRAM_ID
         )
@@ -573,6 +580,13 @@ export default function EnhancedLaunchPage() {
         uniqueId: launchUniqueId,
         instructionCount: launchTransaction.instructions.length
       });
+
+      // Add a small delay to ensure fresh blockhash and prevent duplicate processing
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Get a fresh blockhash to prevent "already processed" errors
+      const { blockhash: freshBlockhash } = await connection.getLatestBlockhash();
+      launchTransaction.recentBlockhash = freshBlockhash;
 
       // Sign and send launch transaction
       // First sign with all keypairs
