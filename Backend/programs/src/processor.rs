@@ -15,8 +15,9 @@ use solana_program::{
     system_instruction,
     instruction::{AccountMeta, Instruction},
 };
-use spl_token::{
+use spl_token_2022::{
     instruction as token_instruction,
+    ID as TOKEN_2022_PROGRAM_ID,
 };
 
 pub struct Processor;
@@ -372,15 +373,16 @@ impl Processor {
         msg!("🎫 Processing BuyTickets instruction");
         msg!("Amount: {}", args.amount);
         
-        if accounts.len() < 4 {
-            msg!("❌ Error: Not enough account keys provided. Expected: 4, Got: {}", accounts.len());
+        if accounts.len() < 5 {
+            msg!("❌ Error: Not enough account keys provided. Expected: 5, Got: {}", accounts.len());
             return Err(ProgramError::NotEnoughAccountKeys);
         }
         
         let user = &accounts[0];
         let launch_data = &accounts[1];
         let user_sol_account = &accounts[2];
-        let system_program = &accounts[3];
+        let ledger_wallet = &accounts[3];
+        let system_program = &accounts[4];
         
         if !user.is_signer {
             msg!("❌ Error: User must be a signer");
@@ -553,10 +555,42 @@ impl Processor {
             return Err(ProgramError::InvalidInstructionData);
         }
         
+        // Calculate platform fee (0.5% of ticket purchase)
+        let fee_rate = 50; // 0.5% fee (50 basis points)
+        let fee_amount = (args.amount * fee_rate) / 10000;
+        let net_amount = args.amount - fee_amount;
+        
+        msg!("💰 Fee calculation:");
+        msg!("  Total amount: {} lamports ({} SOL)", args.amount, args.amount as f64 / 1_000_000_000.0);
+        msg!("  Platform fee: {} lamports ({} SOL)", fee_amount, fee_amount as f64 / 1_000_000_000.0);
+        msg!("  Net to raffle: {} lamports ({} SOL)", net_amount, net_amount as f64 / 1_000_000_000.0);
+        
+        // Transfer platform fee to ledger wallet
+        if fee_amount > 0 {
+            let fee_instruction = system_instruction::transfer(
+                user_sol_account.key,
+                ledger_wallet.key,
+                fee_amount,
+            );
+            
+            invoke_signed(
+                &fee_instruction,
+                &[
+                    user_sol_account.clone(),
+                    ledger_wallet.clone(),
+                    system_program.clone(),
+                ],
+                &[],
+            )?;
+            
+            msg!("✅ Platform fee transferred to ledger wallet");
+        }
+        
+        // Transfer remaining amount to raffle contract
         let transfer_instruction = system_instruction::transfer(
             user_sol_account.key,
             launch_data.key,
-            args.amount,
+            net_amount,
         );
         
         invoke_signed(
@@ -723,7 +757,7 @@ impl Processor {
         msg!("🎁 Minting {} tokens to user {}", tokens_to_mint, user.key);
         
         // Create mint_to instruction
-        let mint_to_instruction = spl_token::instruction::mint_to(
+        let mint_to_instruction = spl_token_2022::instruction::mint_to(
             token_program.key,
             token_mint.key,
             user_token_account.key,
@@ -1077,7 +1111,7 @@ impl Processor {
         )?;
         
         // Mint tokens to user
-        let mint_to_instruction = spl_token::instruction::mint_to(
+        let mint_to_instruction = spl_token_2022::instruction::mint_to(
             token_program.key,
             token_mint.key,
             user_token_account.key,
@@ -1228,7 +1262,7 @@ impl Processor {
             }
             
             let mint_instruction = token_instruction::mint_to(
-                &spl_token::ID,
+                &TOKEN_2022_PROGRAM_ID,
                 token_mint.key,
                 user_token_account.key,
                 amm_account.key,  // AMM PDA is the mint authority
@@ -1244,9 +1278,9 @@ impl Processor {
                 return Err(ProgramError::NotEnoughAccountKeys);
             };
             
-            // Validate it's actually the Token Program
-            if token_program.key != &spl_token::ID {
-                msg!("❌ Error: Invalid Token Program. Expected: {}, Got: {}", spl_token::ID, token_program.key);
+            // Validate it's actually the Token-2022 Program
+            if token_program.key != &TOKEN_2022_PROGRAM_ID {
+                msg!("❌ Error: Invalid Token Program. Expected: {}, Got: {}", TOKEN_2022_PROGRAM_ID, token_program.key);
                 return Err(ProgramError::IncorrectProgramId);
             }
             

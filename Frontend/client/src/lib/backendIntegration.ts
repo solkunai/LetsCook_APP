@@ -19,15 +19,18 @@ import {
 import { getHeliusAPI } from './helius';
 import { PROGRAM_IDS, INSTRUCTION_DISCRIMINATORS } from './apiServices';
 import { blockchainIntegrationService, BlockchainLaunchData } from './blockchainIntegrationService';
+import { InstantLaunchMarketDataService } from './instantLaunchMarketDataService';
 
 // Backend Integration Service
 export class BackendIntegration {
   private connection: Connection;
   private helius: any;
+  private instantMarketDataService: InstantLaunchMarketDataService;
 
   constructor() {
     this.helius = getHeliusAPI();
     this.connection = this.helius.getConnection();
+    this.instantMarketDataService = new InstantLaunchMarketDataService(this.connection);
   }
 
   // Get connection
@@ -373,17 +376,8 @@ export class BackendIntegration {
         return null;
       }
 
-      // Parse the account data based on your program's structure
-      // This is a simplified version - you'll need to implement proper deserialization
-      return {
-        id: launchId,
-        name: 'Parsed Launch Name',
-        symbol: 'SYM',
-        status: 'active',
-        totalTicketsSold: 0,
-        hypeScore: 0,
-        // ... other fields
-      };
+      // Parse the account data using the real parsing method
+      return await this.parseLaunchAccountData(accountInfo.data, pdas.launchDataPDA);
     } catch (error) {
       console.error('Error fetching launch data:', error);
       return null;
@@ -392,7 +386,7 @@ export class BackendIntegration {
 
 
   // Parse launch account data from raw bytes
-  private parseLaunchAccountData(data: Buffer, pubkey: PublicKey): any {
+  private async parseLaunchAccountData(data: Buffer, pubkey: PublicKey): Promise<any> {
     let offset = 8; // Skip discriminator (8 bytes)
     
     // Parse account type (1 byte)
@@ -494,6 +488,34 @@ export class BackendIntegration {
     const downvotes = data.readUInt32LE(offset);
     offset += 4;
     
+    // For instant launches, get real market data
+    let marketData = {
+      currentPrice: Number(ticketPrice) / 1e9,
+      priceChange24h: 0,
+      volume24h: ticketsSold * (Number(ticketPrice) / 1e9),
+      marketCap: Number(totalSupply) * (Number(ticketPrice) / 1e9),
+      liquidity: Number(minimumLiquidity) / 1e9
+    };
+
+    if (launchMeta === 1) { // Instant launch
+      try {
+        const realMarketData = await this.instantMarketDataService.getMarketData(
+          pubkey.toBase58(),
+          actualTokenMint || pubkey.toBase58()
+        );
+        marketData = {
+          currentPrice: realMarketData.price,
+          priceChange24h: realMarketData.priceChange24h,
+          volume24h: realMarketData.volume24h,
+          marketCap: realMarketData.marketCap,
+          liquidity: realMarketData.liquidity
+        };
+      } catch (error) {
+        console.error('Error fetching real market data for instant launch:', error);
+        // Fallback to basic data
+      }
+    }
+    
     return {
       id: pubkey.toBase58(),
       name: pageName || 'Unknown Token',
@@ -505,11 +527,11 @@ export class BackendIntegration {
       totalSupply: Number(totalSupply),
       decimals: 9,
       initialPrice: Number(ticketPrice) / 1e9,
-      currentPrice: Number(ticketPrice) / 1e9,
-      priceChange24h: 0,
-      volume24h: ticketsSold * (Number(ticketPrice) / 1e9),
-      marketCap: Number(totalSupply) * (Number(ticketPrice) / 1e9),
-      liquidity: Number(minimumLiquidity) / 1e9,
+      currentPrice: marketData.currentPrice,
+      priceChange24h: marketData.priceChange24h,
+      volume24h: marketData.volume24h,
+      marketCap: marketData.marketCap,
+      liquidity: marketData.liquidity,
       launchDate: new Date(Number(launchDate) * 1000),
       endDate: new Date(Number(endDate) * 1000),
       creator: creator.toBase58(),

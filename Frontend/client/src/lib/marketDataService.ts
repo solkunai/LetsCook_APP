@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from '@solana/web3.js';
+import { InstantLaunchMarketDataService } from './instantLaunchMarketDataService';
 
 export interface MarketData {
   price: number;
@@ -20,12 +21,14 @@ export interface PriceHistory {
 
 class MarketDataService {
   private connection: Connection;
+  private instantMarketDataService: InstantLaunchMarketDataService;
   private cache: Map<string, { data: MarketData; timestamp: number }> = new Map();
   private priceHistoryCache: Map<string, PriceHistory[]> = new Map();
   private readonly CACHE_DURATION = 30000; // 30 seconds
 
   constructor(connection: Connection) {
     this.connection = connection;
+    this.instantMarketDataService = new InstantLaunchMarketDataService(connection);
   }
 
   // Get real-time market data for a token
@@ -41,6 +44,38 @@ class MarketDataService {
     try {
       console.log('📊 Fetching real blockchain market data for token:', tokenMint);
       
+      // Check if this is an instant launch token
+      const launchData = await this.findLaunchByTokenMint(tokenMint);
+      if (launchData && launchData.launchType === 'instant') {
+        console.log('🚀 Detected instant launch, using InstantLaunchMarketDataService');
+        const instantMarketData = await this.instantMarketDataService.getMarketData(
+          launchData.launchDataAccount,
+          tokenMint
+        );
+        
+        const marketData: MarketData = {
+          price: instantMarketData.price,
+          marketCap: instantMarketData.marketCap,
+          volume24h: instantMarketData.volume24h,
+          liquidity: instantMarketData.liquidity,
+          holders: 0, // Would need to calculate separately
+          priceChange24h: instantMarketData.priceChange24h,
+          priceChange1h: 0, // Would need historical data
+          priceChange7d: 0, // Would need historical data
+          lastUpdated: instantMarketData.lastUpdated
+        };
+        
+        // Cache the data
+        this.cache.set(cacheKey, {
+          data: marketData,
+          timestamp: Date.now()
+        });
+        
+        console.log('✅ Instant launch market data fetched:', marketData);
+        return marketData;
+      }
+      
+      // For non-instant launches, use the existing AMM-based approach
       // Get real AMM account data
       const ammData = await this.getAMMAccountData(tokenMint);
       if (!ammData) {
@@ -93,6 +128,27 @@ class MarketDataService {
       // Fallback to simulated data if blockchain data fails
       console.log('🔄 Falling back to simulated data');
       return await this.simulateMarketData(tokenMint);
+    }
+  }
+
+  // Find launch data by token mint
+  private async findLaunchByTokenMint(tokenMint: string): Promise<{ launchType: string; launchDataAccount: string } | null> {
+    try {
+      // Import launchDataService dynamically to avoid circular dependency
+      const { launchDataService } = await import('./launchDataService');
+      const launchData = await launchDataService.getLaunchByTokenMint(tokenMint);
+      
+      if (launchData) {
+        return {
+          launchType: launchData.launchType,
+          launchDataAccount: launchData.launchDataAccount
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error finding launch by token mint:', error);
+      return null;
     }
   }
 

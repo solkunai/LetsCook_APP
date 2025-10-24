@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { PROGRAM_ID } from './nativeProgram';
 import { blockchainIntegrationService, BlockchainLaunchData } from './blockchainIntegrationService';
+import { InstantLaunchMarketDataService } from './instantLaunchMarketDataService';
 
 export interface LaunchData {
   id: string;
@@ -54,9 +55,11 @@ export interface LaunchData {
 
 export class LaunchDataService {
   private connection: Connection;
+  private instantMarketDataService: InstantLaunchMarketDataService;
 
   constructor(connection: Connection) {
     this.connection = connection;
+    this.instantMarketDataService = new InstantLaunchMarketDataService(connection);
   }
 
   /**
@@ -73,7 +76,7 @@ export class LaunchDataService {
       }
       
       // Convert blockchain data to LaunchData format
-      const launches: LaunchData[] = blockchainLaunches.map(launch => {
+      const launches: LaunchData[] = await Promise.all(blockchainLaunches.map(async (launch) => {
         // Calculate status based on launch type and dates
         let status: 'upcoming' | 'live' | 'ended' = 'live';
         const now = Date.now();
@@ -92,6 +95,34 @@ export class LaunchDataService {
           }
         }
 
+        // For instant launches, get real market data
+        let marketData = {
+          currentPrice: launch.ticketPrice,
+          priceChange24h: 0,
+          volume24h: 0,
+          marketCap: launch.totalSupply * launch.ticketPrice,
+          liquidity: 0
+        };
+
+        if (launch.launchType === 'instant') {
+          try {
+            const realMarketData = await this.instantMarketDataService.getMarketData(
+              launch.accountAddress,
+              launch.baseTokenMint || launch.id
+            );
+            marketData = {
+              currentPrice: realMarketData.price,
+              priceChange24h: realMarketData.priceChange24h,
+              volume24h: realMarketData.volume24h,
+              marketCap: realMarketData.marketCap,
+              liquidity: realMarketData.liquidity
+            };
+          } catch (error) {
+            console.error('Error fetching real market data for instant launch:', error);
+            // Fallback to basic data
+          }
+        }
+
         return {
           id: launch.id,
           name: launch.name,
@@ -105,11 +136,11 @@ export class LaunchDataService {
           totalSupply: launch.totalSupply,
           decimals: launch.decimals,
           initialPrice: launch.ticketPrice,
-          currentPrice: launch.ticketPrice * (1 + Math.random() * 0.1), // Simulate price change
-          priceChange24h: (Math.random() - 0.5) * 20, // Simulate price change
-          volume24h: Math.random() * 1000, // Would be calculated from real data
-          marketCap: launch.totalSupply * launch.ticketPrice,
-          liquidity: Math.random() * 10000, // Would be calculated from real data
+          currentPrice: marketData.currentPrice,
+          priceChange24h: marketData.priceChange24h,
+          volume24h: marketData.volume24h,
+          marketCap: marketData.marketCap,
+          liquidity: marketData.liquidity,
           launchDate: launch.launchDate,
           endDate: launch.endDate,
           creator: launch.creator,
@@ -137,7 +168,7 @@ export class LaunchDataService {
             keys: launch.rawMetadata.keys
           } : undefined
         };
-      });
+      }));
 
       return launches;
     } catch (error) {
@@ -291,6 +322,34 @@ export class LaunchDataService {
         }
       }
 
+      // For instant launches, get real market data
+      let marketData = {
+        currentPrice: blockchainLaunch.ticketPrice,
+        priceChange24h: 0,
+        volume24h: 0,
+        marketCap: blockchainLaunch.totalSupply * blockchainLaunch.ticketPrice,
+        liquidity: 0
+      };
+
+      if (blockchainLaunch.launchType === 'instant') {
+        try {
+          const realMarketData = await this.instantMarketDataService.getMarketData(
+            blockchainLaunch.accountAddress,
+            blockchainLaunch.baseTokenMint || blockchainLaunch.id
+          );
+          marketData = {
+            currentPrice: realMarketData.price,
+            priceChange24h: realMarketData.priceChange24h,
+            volume24h: realMarketData.volume24h,
+            marketCap: realMarketData.marketCap,
+            liquidity: realMarketData.liquidity
+          };
+        } catch (error) {
+          console.error('Error fetching real market data for instant launch:', error);
+          // Fallback to basic data
+        }
+      }
+
       // Convert blockchain data to LaunchData format
       return {
         id: blockchainLaunch.id,
@@ -303,11 +362,11 @@ export class LaunchDataService {
         totalSupply: blockchainLaunch.totalSupply,
         decimals: blockchainLaunch.decimals,
         initialPrice: blockchainLaunch.ticketPrice,
-        currentPrice: blockchainLaunch.ticketPrice * (1 + Math.random() * 0.1),
-        priceChange24h: (Math.random() - 0.5) * 20,
-        volume24h: Math.random() * 1000,
-        marketCap: blockchainLaunch.totalSupply * blockchainLaunch.ticketPrice,
-        liquidity: Math.random() * 10000,
+        currentPrice: marketData.currentPrice,
+        priceChange24h: marketData.priceChange24h,
+        volume24h: marketData.volume24h,
+        marketCap: marketData.marketCap,
+        liquidity: marketData.liquidity,
         launchDate: blockchainLaunch.launchDate,
         endDate: blockchainLaunch.endDate,
         creator: blockchainLaunch.creator,

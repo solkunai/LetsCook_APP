@@ -25,8 +25,22 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { Connection, PublicKey, Transaction, SystemProgram, Keypair } from '@solana/web3.js';
-import { createInitializeMintInstruction, TOKEN_PROGRAM_ID, MINT_SIZE, getMinimumBalanceForRentExemptMint } from '@solana/spl-token';
+import { Connection, PublicKey, Transaction, SystemProgram, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { 
+  createInitializeMintInstruction,
+  TOKEN_PROGRAM_ID, 
+  MINT_SIZE, 
+  TOKEN_2022_PROGRAM_ID,
+  getMintLen,
+  ExtensionType,
+  createInitializeMetadataPointerInstruction,
+  createInitializeInstruction as createInitializeMetadataInstruction,
+  createSetAuthorityInstruction,
+  AuthorityType,
+  TYPE_SIZE,
+  LENGTH_SIZE
+} from '@solana/spl-token';
+import { pack } from '@solana/spl-token-metadata';
 import { useLocation } from 'wouter';
 import { pinataService, uploadImageToIPFS } from '@/lib/pinataService';
 import { toast } from '@/hooks/use-toast';
@@ -39,11 +53,12 @@ import { realLaunchService } from '@/lib/realLaunchService';
 import { swapTokensRaydium, addLiquidityRaydium } from '@/lib/raydium';
 import { TokenVisibilityHelper, TokenMetadata } from '@/lib/tokenVisibilityHelper';
 import { MetaplexMetadataService } from '@/lib/metaplexMetadataService';
+import { LaunchpadTokenMetadataService } from '@/lib/launchpadTokenMetadataService';
 
 const STEPS = ['basic', 'dex', 'config', 'social', 'review'];
 
 // Placeholder wallet address for fees - replace with actual fee wallet
-const LEDGER_WALLET = new PublicKey('8fvPxVrPp1p3QGwjiFQVYg5xpBTVrWrarrUxQryftUZV');
+const LEDGER_WALLET = new PublicKey('A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
 
 export default function EnhancedLaunchPage() {
   const { connected, publicKey, wallet, signTransaction } = useWallet();
@@ -343,6 +358,49 @@ export default function EnhancedLaunchPage() {
     });
   };
 
+  // Helper function to check wallet balance
+  const checkWalletBalance = async () => {
+    if (!publicKey) return 0;
+    
+    try {
+      const balance = await connection.getBalance(publicKey);
+      return balance;
+    } catch (error) {
+      console.error('Failed to get wallet balance:', error);
+      return 0;
+    }
+  };
+
+  // Helper function to request airdrop for funding (devnet only)
+  const requestAirdrop = async () => {
+    if (!publicKey) {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      console.log('💰 Requesting airdrop for wallet:', publicKey.toBase58());
+      const signature = await connection.requestAirdrop(publicKey, 2 * LAMPORTS_PER_SOL);
+      await connection.confirmTransaction(signature, 'confirmed');
+      
+      toast({
+        title: "Airdrop Successful",
+        description: "2 SOL has been added to your wallet.",
+      });
+    } catch (error) {
+      console.error('Airdrop failed:', error);
+      toast({
+        title: "Airdrop Failed",
+        description: "Failed to request airdrop. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const removeImage = () => {
     updateFormData('image', '');
     toast({
@@ -377,6 +435,20 @@ export default function EnhancedLaunchPage() {
       adapterConnected: wallet.adapter?.connected
     });
 
+    // Check wallet balance before proceeding
+    const balance = await checkWalletBalance();
+    const balanceSOL = balance / LAMPORTS_PER_SOL;
+    console.log('💰 Wallet balance:', balanceSOL.toFixed(4), 'SOL');
+    
+    if (balanceSOL < 0.01) {
+      toast({
+        title: "Insufficient Balance",
+        description: `You need at least 0.01 SOL to create a token. Current balance: ${balanceSOL.toFixed(4)} SOL. Please add SOL to your wallet.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -401,18 +473,9 @@ export default function EnhancedLaunchPage() {
       
       const tokenMintTransaction = new Transaction();
       
-      // Create base token mint (the actual token being launched)
-      const baseTokenMintLamports = await getMinimumBalanceForRentExemptMint(connection);
-      tokenMintTransaction.add(
-        SystemProgram.createAccount({
-          fromPubkey: publicKey,
-          newAccountPubkey: baseTokenMintKeypair.publicKey,
-          space: MINT_SIZE,
-          lamports: baseTokenMintLamports,
-          programId: TOKEN_PROGRAM_ID,
-        })
-      );
-
+      // Create base token mint using SPL Token-2022 with metadata support
+      console.log('🪙 Creating SPL Token-2022 mint with metadata...');
+      
       // Derive AMM PDA to use as mint authority
       const [ammPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('amm'), baseTokenMintKeypair.publicKey.toBuffer()],
@@ -420,16 +483,7 @@ export default function EnhancedLaunchPage() {
       );
       console.log('🔍 AMM PDA (mint authority):', ammPDA.toBase58());
 
-      // Initialize base token mint with AMM PDA as mint authority
-      tokenMintTransaction.add(
-        createInitializeMintInstruction(
-          baseTokenMintKeypair.publicKey, // mint
-          formData.decimals, // decimals
-          ammPDA, // mint authority (AMM PDA) - CRITICAL FIX!
-          publicKey, // freeze authority (user)
-          TOKEN_PROGRAM_ID
-        )
-      );
+      // We'll add the account creation and initialization instructions after we calculate the proper space
 
       // Create metadata JSON and upload to IPFS
       console.log('📦 Creating token metadata JSON...');
@@ -462,39 +516,201 @@ export default function EnhancedLaunchPage() {
         metadataUri = imageUrl;
       }
 
-      // Add Metaplex metadata for the token (so wallets display it properly)
-      console.log('🏷️ Adding Metaplex metadata...');
-      await MetaplexMetadataService.createTokenMetadata(
-        connection,
-        baseTokenMintKeypair.publicKey,
-        publicKey, // update authority
-        formData.name,
-        formData.symbol,
-        metadataUri, // metadata URI (IPFS URL with JSON)
-        tokenMintTransaction
-      );
-      console.log('✅ Metadata instruction added');
+      // Create comprehensive token metadata for wallet visibility
+      console.log('🏷️ Creating comprehensive token metadata...');
+      try {
+        const metadataResult = await LaunchpadTokenMetadataService.createTokenMetadata(
+          connection,
+          baseTokenMintKeypair.publicKey,
+          {
+            name: formData.name,
+            symbol: formData.symbol,
+            description: formData.description || `${formData.name} - Launched on Let's Cook`,
+            image: imageUrl,
+            website: formData.website,
+            twitter: formData.twitter,
+            telegram: formData.telegram,
+            discord: formData.discord,
+            launchType: formData.type,
+            creatorWallet: publicKey.toBase58()
+          }
+        );
+        
+        if (metadataResult.success) {
+          console.log('✅ Token metadata created successfully');
+          console.log('📊 Metadata URI:', metadataResult.metadataUri);
+          
+          // Now create the base token mint account with proper space calculation
+          console.log('🏗️ Creating base token mint account with calculated space...');
+          const extensions = [ExtensionType.MetadataPointer];
+          // Calculate the actual metadata size from the JSON we created
+          const metadataSize = TYPE_SIZE + LENGTH_SIZE + pack({
+            name: formData.name,
+            symbol: formData.symbol,
+            uri: metadataResult.metadataUri || metadataUri,
+            updateAuthority: publicKey,
+            mint: baseTokenMintKeypair.publicKey,
+            additionalMetadata: []
+          }).length;
+          
+          // Create account with space for mint + metadata pointer extension only
+          // But fund it with enough lamports for the final size (including metadata content)
+          const mintLen = getMintLen(extensions);
+          const totalSpace = mintLen + metadataSize;
+          const baseTokenMintLamports = await connection.getMinimumBalanceForRentExemption(totalSpace);
+          
+          tokenMintTransaction.add(
+            SystemProgram.createAccount({
+              fromPubkey: publicKey,
+              newAccountPubkey: baseTokenMintKeypair.publicKey,
+              space: mintLen,
+              lamports: baseTokenMintLamports,
+              programId: TOKEN_2022_PROGRAM_ID,
+            })
+          );
 
-      // Create quote token mint (SOL - wrapped SOL)
-      const quoteTokenMintLamports = await getMinimumBalanceForRentExemptMint(connection);
+          // Initialize metadata pointer extension (points to the mint itself for metadata)
+          tokenMintTransaction.add(
+            createInitializeMetadataPointerInstruction(
+              baseTokenMintKeypair.publicKey, // mint
+              publicKey, // authority (user wallet)
+              baseTokenMintKeypair.publicKey, // metadata address (self)
+              TOKEN_2022_PROGRAM_ID
+            )
+          );
+
+          // Initialize base token mint with user as mint authority (can be transferred to AMM PDA later)
+          tokenMintTransaction.add(
+            createInitializeMintInstruction(
+              baseTokenMintKeypair.publicKey, // mint
+              formData.decimals, // decimals
+              publicKey, // mint authority (user wallet)
+              publicKey, // freeze authority (user)
+              TOKEN_2022_PROGRAM_ID
+            )
+          );
+          
+        // Initialize the metadata on the Token-2022 mint with the actual IPFS URI
+        console.log('🏷️ Initializing metadata on Token-2022 mint with IPFS URI...');
+        try {
+          tokenMintTransaction.add(
+            createInitializeMetadataInstruction({
+              programId: TOKEN_2022_PROGRAM_ID,
+              mint: baseTokenMintKeypair.publicKey,
+              metadata: baseTokenMintKeypair.publicKey, // metadata stored in mint itself
+              mintAuthority: publicKey, // user wallet (will be transferred to AMM PDA later)
+              updateAuthority: publicKey, // user wallet
+              name: formData.name,
+              symbol: formData.symbol,
+              uri: metadataResult.metadataUri || metadataUri
+            })
+          );
+          console.log('✅ Metadata initialization instruction added with IPFS URI');
+        } catch (error) {
+          console.warn('⚠️ Failed to add metadata initialization instruction:', error);
+        }
+        } else {
+          console.warn('⚠️ Metadata creation failed:', metadataResult.error);
+          console.log('💡 Token will still work, but may show as "Unknown Token" in wallets');
+          
+          // Fallback: create account with minimal space if metadata creation failed
+          console.log('🏗️ Creating base token mint account with minimal space...');
+          const extensions = [ExtensionType.MetadataPointer];
+          const mintLen = getMintLen(extensions);
+          const baseTokenMintLamports = await connection.getMinimumBalanceForRentExemption(mintLen);
+          
+          tokenMintTransaction.add(
+            SystemProgram.createAccount({
+              fromPubkey: publicKey,
+              newAccountPubkey: baseTokenMintKeypair.publicKey,
+              space: mintLen,
+              lamports: baseTokenMintLamports,
+              programId: TOKEN_2022_PROGRAM_ID,
+            })
+          );
+
+          // Initialize metadata pointer extension (points to the mint itself for metadata)
+          tokenMintTransaction.add(
+            createInitializeMetadataPointerInstruction(
+              baseTokenMintKeypair.publicKey, // mint
+              publicKey, // authority (user wallet)
+              baseTokenMintKeypair.publicKey, // metadata address (self)
+              TOKEN_2022_PROGRAM_ID
+            )
+          );
+
+          // Initialize base token mint with user as mint authority (can be transferred to AMM PDA later)
+          tokenMintTransaction.add(
+            createInitializeMintInstruction(
+              baseTokenMintKeypair.publicKey, // mint
+              formData.decimals, // decimals
+              publicKey, // mint authority (user wallet)
+              publicKey, // freeze authority (user)
+              TOKEN_2022_PROGRAM_ID
+            )
+          );
+        }
+      } catch (error) {
+        console.warn('⚠️ Metadata creation failed, but token will still work:', error);
+        
+        // Fallback: create account with minimal space if metadata creation failed
+        console.log('🏗️ Creating base token mint account with minimal space...');
+        const extensions = [ExtensionType.MetadataPointer];
+        const mintLen = getMintLen(extensions);
+        const baseTokenMintLamports = await connection.getMinimumBalanceForRentExemption(mintLen);
+        
+        tokenMintTransaction.add(
+          SystemProgram.createAccount({
+            fromPubkey: publicKey,
+            newAccountPubkey: baseTokenMintKeypair.publicKey,
+            space: mintLen,
+            lamports: baseTokenMintLamports,
+            programId: TOKEN_2022_PROGRAM_ID,
+          })
+        );
+
+        // Initialize metadata pointer extension (points to the mint itself for metadata)
+        tokenMintTransaction.add(
+          createInitializeMetadataPointerInstruction(
+            baseTokenMintKeypair.publicKey, // mint
+            publicKey, // authority (user wallet)
+            baseTokenMintKeypair.publicKey, // metadata address (self)
+            TOKEN_2022_PROGRAM_ID
+          )
+        );
+
+        // Initialize base token mint with user as mint authority (can be transferred to AMM PDA later)
+        tokenMintTransaction.add(
+          createInitializeMintInstruction(
+            baseTokenMintKeypair.publicKey, // mint
+            formData.decimals, // decimals
+            publicKey, // mint authority (user wallet)
+            publicKey, // freeze authority (user)
+            TOKEN_2022_PROGRAM_ID
+          )
+        );
+      }
+
+      // Create quote token mint (SOL - wrapped SOL) using Token-2022
+      const quoteTokenMintLamports = await connection.getMinimumBalanceForRentExemption(getMintLen([]));
       tokenMintTransaction.add(
         SystemProgram.createAccount({
           fromPubkey: publicKey,
           newAccountPubkey: quoteTokenMintKeypair.publicKey,
-          space: MINT_SIZE,
+          space: getMintLen([]),
           lamports: quoteTokenMintLamports,
-          programId: TOKEN_PROGRAM_ID,
+          programId: TOKEN_2022_PROGRAM_ID,
         })
       );
 
-      // Initialize quote token mint (SOL)
+      // Initialize quote token mint (SOL) using Token-2022
       tokenMintTransaction.add(
         createInitializeMintInstruction(
           quoteTokenMintKeypair.publicKey, // mint
           9, // SOL has 9 decimals
           publicKey, // mint authority (user)
           publicKey, // freeze authority (user)
-          TOKEN_PROGRAM_ID
+          TOKEN_2022_PROGRAM_ID
         )
       );
 
@@ -508,6 +724,7 @@ export default function EnhancedLaunchPage() {
       console.log('🔍 Token mint transaction unique ID:', tokenMintUniqueId);
 
       // Sign and send token mint transaction
+      // Note: The user wallet needs to sign since the AMM PDA is used as mint authority
       tokenMintTransaction.sign(baseTokenMintKeypair, quoteTokenMintKeypair);
       const signedTokenMintTransaction = await signTransaction(tokenMintTransaction);
       
@@ -515,6 +732,55 @@ export default function EnhancedLaunchPage() {
         const tokenMintSignature = await connection.sendRawTransaction(signedTokenMintTransaction.serialize());
         await connection.confirmTransaction(tokenMintSignature, 'confirmed');
         console.log('✅ SPL token mints created and initialized:', tokenMintSignature);
+        
+        // Transfer mint authority from user to AMM PDA
+        console.log('🔄 Transferring mint authority to AMM PDA...');
+        const authorityTransferTransaction = new Transaction();
+        authorityTransferTransaction.add(
+          createSetAuthorityInstruction(
+            baseTokenMintKeypair.publicKey, // mint
+            publicKey, // current authority (user wallet)
+            AuthorityType.MintTokens, // authority type
+            ammPDA, // new authority (AMM PDA)
+            [], // multiSigners (empty since user is signing)
+            TOKEN_2022_PROGRAM_ID
+          )
+        );
+        
+        // Set transaction properties
+        const { blockhash: authorityBlockhash } = await connection.getLatestBlockhash();
+        authorityTransferTransaction.recentBlockhash = authorityBlockhash;
+        authorityTransferTransaction.feePayer = publicKey;
+        
+        // Sign and send authority transfer transaction
+        const signedAuthorityTransaction = await signTransaction(authorityTransferTransaction);
+        const authorityTransferSignature = await connection.sendRawTransaction(signedAuthorityTransaction.serialize());
+        await connection.confirmTransaction(authorityTransferSignature, 'confirmed');
+        console.log('✅ Mint authority transferred to AMM PDA:', authorityTransferSignature);
+        
+        // Create metadata for the token
+        console.log('🏷️ Creating token metadata...');
+        try {
+          const metadataSignature = await MetaplexMetadataService.createTokenMetadata(
+            connection,
+            baseTokenMintKeypair.publicKey,
+            publicKey,
+            formData.name,
+            formData.symbol,
+            metadataUri
+          );
+          
+          if (metadataSignature) {
+            console.log('✅ Token metadata created successfully:', metadataSignature);
+            console.log('🎯 Token will show up in wallets with proper metadata!');
+          } else {
+            console.log('⚠️ Metadata creation failed, but token will still work for trading');
+          }
+        } catch (metadataError) {
+          console.error('❌ Error creating metadata:', metadataError);
+          console.log('⚠️ Token will work perfectly for trading, but will show as "Unknown Token"');
+        }
+        
       } catch (error) {
         if (error instanceof Error && error.message.includes('already been processed')) {
           console.log('⚠️ Token mint transaction already processed, continuing...');
@@ -601,8 +867,8 @@ export default function EnhancedLaunchPage() {
           baseTokenMint: baseTokenMintKeypair.publicKey,
           cookBaseToken: publicKey, // Using user as placeholder
           team: teamKeypair.publicKey,
-          quoteTokenProgram: TOKEN_PROGRAM_ID,
-          baseTokenProgram: TOKEN_PROGRAM_ID,
+          quoteTokenProgram: TOKEN_2022_PROGRAM_ID,
+          baseTokenProgram: TOKEN_2022_PROGRAM_ID,
           associatedToken: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
           systemProgram: SystemProgram.programId,
         }

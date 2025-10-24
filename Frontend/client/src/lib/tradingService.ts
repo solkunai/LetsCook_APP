@@ -356,7 +356,7 @@ export class TradingService {
       );
       
       // Fees account (ledger_wallet) - using devnet fees account
-      const feesAccount = new PublicKey('FxVpjJ5AGY6cfCwZQP5v8QBfS4J2NPa62HbGh1Fu2LpD');
+      const feesAccount = new PublicKey('A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
       
       // For Cook AMM swaps, we need the user's SOL account (same as user key for SOL)
       const userSolAccount = userKey;
@@ -1136,15 +1136,16 @@ export class TradingService {
         argsBuffer
       ]);
       
+      // Fees account (ledger_wallet) - same as trading service
+      const feesAccount = new PublicKey('A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
+      
       const instruction = new TransactionInstruction({
         keys: [
-          { pubkey: userPubkey, isSigner: true, isWritable: true },           // user
-          { pubkey: launchDataAccount, isSigner: false, isWritable: true },    // launch_data
-          { pubkey: ammAccount, isSigner: false, isWritable: true },            // amm_account
-          { pubkey: userTokenAccount, isSigner: false, isWritable: true },     // user_token_account
-          { pubkey: rafflePubkey, isSigner: false, isWritable: true },        // token_mint
-          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },    // token_program
-          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+          { pubkey: userPubkey, isSigner: true, isWritable: true },           // user (0)
+          { pubkey: launchDataAccount, isSigner: false, isWritable: true },    // launch_data (1)
+          { pubkey: userPubkey, isSigner: false, isWritable: true },          // user_sol_account (2) - same as user
+          { pubkey: feesAccount, isSigner: false, isWritable: true },         // ledger_wallet (3) - for platform fees
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program (4)
         ],
         programId: PROGRAM_ID,
         data: instructionData,

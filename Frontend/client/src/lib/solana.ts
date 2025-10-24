@@ -21,7 +21,7 @@ export function getConnection(network: keyof typeof NETWORK = 'devnet') {
 // Common account addresses
 export const COMMON_ADDRESSES = {
   SYSTEM_PROGRAM: new PublicKey('11111111111111111111111111111111'),
-  TOKEN_PROGRAM: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+  TOKEN_PROGRAM: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'),
   ASSOCIATED_TOKEN_PROGRAM: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
   RENT: new PublicKey('SysvarRent111111111111111111111111111111111'),
 } as const;

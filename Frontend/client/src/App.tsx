@@ -34,6 +34,7 @@ import NativeProgramTestPage from "@/pages/NativeProgramTestPage";
 import BlockchainDebugPage from "@/pages/BlockchainDebugPage";
 import SimpleTestPage from "@/pages/SimpleTestPage";
 import OnboardingFlow from "@/components/OnboardingFlow";
+import TokenVerificationPage from "@/pages/TokenVerificationPage";
 
 function Router() {
   return (
@@ -66,6 +67,7 @@ function Router() {
       <Route path="/blockchain-debug" component={BlockchainDebugPage} />
       <Route path="/simple-test" component={SimpleTestPage} />
       <Route path="/native-test" component={NativeProgramTestPage} />
+      <Route path="/token-verification" component={TokenVerificationPage} />
     </Switch>
   );
 }

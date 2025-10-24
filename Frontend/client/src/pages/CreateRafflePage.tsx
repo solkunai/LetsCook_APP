@@ -33,17 +33,14 @@ import { useLocation } from 'wouter';
 import { pinataService, uploadImageToIPFS } from '@/lib/pinataService';
 import { ipfsMetadataService } from '@/lib/ipfsMetadataService';
 import { toast } from '@/hooks/use-toast';
-import { Calendar as CalendarComponent } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Button } from '@/components/ui/button';
-import { format } from 'date-fns';
-import * as borsh from 'borsh';
-import { Buffer } from 'buffer';
 import Header from '../components/Header';
 import DEXSelector from '../components/DEXSelector';
 import { realLaunchService } from '../lib/realLaunchService';
 import { PROGRAM_ID, LetsCookProgram, LaunchInstruction } from '../lib/nativeProgram';
 import { INSTRUCTION_DISCRIMINATORS } from '../lib/apiServices';
+import * as borsh from 'borsh';
+import { Buffer } from 'buffer';
+import { LaunchpadTokenMetadataService } from '@/lib/launchpadTokenMetadataService';
 
 const STEPS = ['basic', 'dex', 'config', 'social', 'review'];
 
@@ -58,8 +55,6 @@ export default function CreateRafflePage() {
   const [txSignature, setTxSignature] = useState<string | null>(null);
   const [createdLaunchId, setCreatedLaunchId] = useState<string | null>(null);
   const [createdTokenMint, setCreatedTokenMint] = useState<string | null>(null);
-  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
-  const [durationMode, setDurationMode] = useState<'hours' | 'date'>('hours');
 
   // Connection to devnet with better timeout settings
   const connection = new Connection('https://api.devnet.solana.com', {
@@ -189,46 +184,6 @@ export default function CreateRafflePage() {
     if (errors[field]) {
       const { [field]: _, ...rest } = errors;
       setErrors(rest);
-    }
-  };
-
-  // Helper functions for duration conversion
-  const convertHoursToDate = (hours: number) => {
-    const now = new Date();
-    const endTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
-    return endTime;
-  };
-
-  const convertDateToHours = (date: Date) => {
-    const now = new Date();
-    const diffMs = date.getTime() - now.getTime();
-    return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
-  };
-
-  const updateDurationFromDate = (date: Date | undefined) => {
-    if (date) {
-      const hours = convertDateToHours(date);
-      updateFormData('raffleDuration', hours);
-    }
-  };
-
-  const updateDurationFromHours = (hours: number) => {
-    const date = convertHoursToDate(hours);
-    setEndDate(date);
-  };
-
-  // Helper function to handle number input changes
-  const handleNumberChange = (field: keyof RaffleFormData, value: string) => {
-    // Allow empty string for deletion
-    if (value === '') {
-      updateFormData(field, 0);
-      return;
-    }
-    
-    // Only allow numbers and decimal point
-    const numericValue = parseFloat(value);
-    if (!isNaN(numericValue) && numericValue >= 0) {
-      updateFormData(field, numericValue);
     }
   };
 
@@ -508,8 +463,8 @@ export default function CreateRafflePage() {
           baseTokenMint: baseTokenMintKeypair.publicKey,
           cookBaseToken: publicKey, // Using user as placeholder
           team: teamKeypair.publicKey,
-          quoteTokenProgram: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-          baseTokenProgram: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+          quoteTokenProgram: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'),
+          baseTokenProgram: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'),
           associatedToken: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
           systemProgram: SystemProgram.programId,
         }
@@ -598,6 +553,51 @@ export default function CreateRafflePage() {
               variant: "destructive",
             });
           }
+
+          // Create comprehensive token metadata for wallet visibility
+          console.log('🏷️ Creating comprehensive token metadata for raffle...');
+          try {
+            const metadataResult = await LaunchpadTokenMetadataService.createTokenMetadata(
+              connection,
+              baseTokenMintKeypair.publicKey,
+              {
+                name: formData.name,
+                symbol: formData.symbol,
+                description: formData.description || `${formData.name} - Raffle Launch on Let's Cook`,
+                image: formData.image,
+                website: formData.website,
+                twitter: formData.twitter,
+                telegram: formData.telegram,
+                discord: formData.discord,
+                launchType: 'raffle',
+                creatorWallet: publicKey.toBase58()
+              }
+            );
+            
+            if (metadataResult.success) {
+              console.log('✅ Raffle token metadata created successfully');
+              console.log('📊 Metadata URI:', metadataResult.metadataUri);
+              
+              toast({
+                title: "Token Metadata Created!",
+                description: "Your raffle token will be visible in Solana wallets with proper metadata.",
+              });
+            } else {
+              console.warn('⚠️ Metadata creation failed:', metadataResult.error);
+              toast({
+                title: "Metadata Creation Failed",
+                description: "Raffle created but token may show as 'Unknown Token' in wallets.",
+                variant: "destructive",
+              });
+            }
+          } catch (error) {
+            console.warn('⚠️ Metadata creation failed, but raffle will still work:', error);
+            toast({
+              title: "Metadata Creation Failed",
+              description: "Raffle created but token may show as 'Unknown Token' in wallets.",
+              variant: "destructive",
+            });
+          }
       
       setTxSignature(signature);
       setCreatedLaunchId(launchDataKeypair.publicKey.toBase58());
@@ -660,8 +660,7 @@ export default function CreateRafflePage() {
       teamAllocation: 20,
       marketingAllocation: 15,
       liquidityAllocation: 10,
-      treasuryAllocation: 5,
-      type: 'raffle'
+      treasuryAllocation: 5
     });
     setTxSignature(null);
     setErrors({});
@@ -1100,16 +1099,15 @@ export default function CreateRafflePage() {
                       <label className="block text-sm font-medium text-slate-300 mb-2">
                         Ticket Price (SOL) *
                       </label>
-                        <input
-                          type="number"
-                          step="0.001"
-                          value={formData.ticketPrice || ''}
-                          onChange={(e) => handleNumberChange('ticketPrice', e.target.value)}
-                          className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                            errors.ticketPrice ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
-                          }`}
-                          placeholder="0.1"
-                        />
+                      <input
+                        type="number"
+                        step="0.001"
+                        value={formData.ticketPrice}
+                        onChange={(e) => updateFormData('ticketPrice', Number(e.target.value))}
+                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
+                          errors.ticketPrice ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
+                        }`}
+                      />
                       {errors.ticketPrice && <p className="text-red-400 text-xs mt-1">{errors.ticketPrice}</p>}
                     </div>
 
@@ -1117,124 +1115,29 @@ export default function CreateRafflePage() {
                       <label className="block text-sm font-medium text-slate-300 mb-2">
                         Maximum Tickets *
                       </label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="number"
-                          value={formData.maxTickets || ''}
-                          onChange={(e) => handleNumberChange('maxTickets', e.target.value)}
-                          className={`flex-1 bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                            errors.maxTickets ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
-                          }`}
-                          placeholder="Enter max tickets (0 for unlimited)"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateFormData('maxTickets', 0)}
-                          className="px-4 py-3 bg-yellow-600 hover:bg-yellow-700 text-black rounded-lg transition-colors text-sm font-medium"
-                        >
-                          Unlimited
-                        </button>
-                      </div>
-                      <div className="mt-2 text-sm text-slate-400">
-                        {formData.maxTickets === 0 
-                          ? 'Unlimited tickets can be sold' 
-                          : `Maximum ${formData.maxTickets.toLocaleString()} tickets can be sold`
-                        }
-                      </div>
+                      <input
+                        type="number"
+                        value={formData.maxTickets}
+                        onChange={(e) => updateFormData('maxTickets', Number(e.target.value))}
+                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
+                          errors.maxTickets ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
+                        }`}
+                      />
                       {errors.maxTickets && <p className="text-red-400 text-xs mt-1">{errors.maxTickets}</p>}
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-slate-300 mb-2">
-                        Duration *
+                        Duration (Hours) *
                       </label>
-                      
-                      {/* Duration Mode Toggle */}
-                      <div className="flex mb-3 bg-slate-800 rounded-lg p-1">
-                        <button
-                          type="button"
-                          onClick={() => setDurationMode('hours')}
-                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                            durationMode === 'hours'
-                              ? 'bg-yellow-600 text-black'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <Clock className="w-4 h-4" />
-                          Hours
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDurationMode('date')}
-                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                            durationMode === 'date'
-                              ? 'bg-yellow-600 text-black'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <Calendar className="w-4 h-4" />
-                          End Date
-                        </button>
-                      </div>
-
-                      {/* Hours Input */}
-                      {durationMode === 'hours' && (
-                        <input
-                          type="number"
-                          value={formData.raffleDuration || ''}
-                          onChange={(e) => {
-                            const hours = Number(e.target.value);
-                            handleNumberChange('raffleDuration', e.target.value);
-                            updateDurationFromHours(hours);
-                          }}
-                          className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
-                            errors.raffleDuration ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
-                          }`}
-                          placeholder="Enter duration in hours"
-                        />
-                      )}
-
-                      {/* Calendar Input */}
-                      {durationMode === 'date' && (
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className={`w-full justify-start text-left font-normal bg-slate-800 border-slate-700 text-white hover:bg-slate-700 ${
-                                !endDate && 'text-slate-500'
-                              }`}
-                            >
-                              <Calendar className="mr-2 h-4 w-4" />
-                              {endDate ? format(endDate, "PPP") : "Pick end date"}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0 bg-slate-900 border-slate-700">
-                            <CalendarComponent
-                              mode="single"
-                              selected={endDate}
-                              onSelect={(date) => {
-                                setEndDate(date);
-                                updateDurationFromDate(date);
-                              }}
-                              disabled={(date) => date < new Date()}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      )}
-
-                      {/* Duration Display */}
-                      {formData.raffleDuration > 0 && (
-                        <div className="mt-2 text-sm text-slate-400">
-                          {formData.raffleDuration} hours
-                          {endDate && (
-                            <span className="ml-2">
-                              (Ends: {format(endDate, "MMM dd, yyyy 'at' h:mm a")})
-                            </span>
-                          )}
-                        </div>
-                      )}
-
+                      <input
+                        type="number"
+                        value={formData.raffleDuration}
+                        onChange={(e) => updateFormData('raffleDuration', Number(e.target.value))}
+                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
+                          errors.raffleDuration ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
+                        }`}
+                      />
                       {errors.raffleDuration && <p className="text-red-400 text-xs mt-1">{errors.raffleDuration}</p>}
                     </div>
 
@@ -1244,50 +1147,13 @@ export default function CreateRafflePage() {
                       </label>
                       <input
                         type="number"
-                        value={formData.winnerCount || ''}
-                        onChange={(e) => handleNumberChange('winnerCount', e.target.value)}
+                        value={formData.winnerCount}
+                        onChange={(e) => updateFormData('winnerCount', Number(e.target.value))}
                         className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
                           errors.winnerCount ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
-                        placeholder="100"
                       />
                       {errors.winnerCount && <p className="text-red-400 text-xs mt-1">{errors.winnerCount}</p>}
-                    </div>
-
-                    {/* Guaranteed Liquidity Threshold */}
-                    <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
-                      <div className="flex items-center mb-3">
-                        <Info className="w-5 h-5 text-yellow-400 mr-3 mt-0.5 flex-shrink-0" />
-                        <div className="text-sm text-yellow-200">
-                          <strong>Guaranteed Liquidity Threshold</strong>
-                        </div>
-                      </div>
-                      <div className="text-sm text-yellow-200">
-                        <p className="mb-2">
-                          This raffle requires a minimum liquidity threshold to succeed:
-                        </p>
-                        <div className="bg-slate-800/50 rounded-lg p-3">
-                          <div className="flex justify-between items-center mb-1">
-                            <span>Winning Tickets:</span>
-                            <span className="font-semibold">{formData.winnerCount.toLocaleString()}</span>
-                          </div>
-                          <div className="flex justify-between items-center mb-1">
-                            <span>Ticket Price:</span>
-                            <span className="font-semibold">{formData.ticketPrice} SOL</span>
-                          </div>
-                          <div className="border-t border-yellow-500/30 pt-2 mt-2">
-                            <div className="flex justify-between items-center">
-                              <span className="font-semibold">Required Liquidity:</span>
-                              <span className="font-bold text-yellow-400">
-                                {(formData.winnerCount * formData.ticketPrice).toFixed(2)} SOL
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <p className="mt-2 text-yellow-200/80">
-                          The raffle will only succeed if tickets worth at least this amount are sold.
-                        </p>
-                      </div>
                     </div>
                   </div>
 
