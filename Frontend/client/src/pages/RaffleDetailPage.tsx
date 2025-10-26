@@ -40,6 +40,7 @@ import { useLocation, useRoute } from 'wouter';
 import { toast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { raffleService } from '@/lib/raffleService';
+import { blockchainIntegrationService } from '@/lib/blockchainIntegrationService';
 import VotingComponent from '@/components/VotingComponent';
 import MarketMakingRewards from '@/components/MarketMakingRewards';
 
@@ -135,6 +136,10 @@ export default function RaffleDetailPage() {
       }
 
       console.log('🔍 Fetching raffle data for ID:', raffleId);
+      
+      // Clear cache to ensure we get fresh data for this specific raffle
+      console.log('🗑️ Clearing cache to get fresh raffle data...');
+      blockchainIntegrationService.clearCache();
       
       // Use dedicated raffle service to fetch the raffle data
       const raffleData = await raffleService.fetchRaffleById(raffleId);

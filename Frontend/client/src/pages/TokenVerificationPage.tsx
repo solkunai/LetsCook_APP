@@ -131,7 +131,7 @@ export default function TokenVerificationPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-navy-900">
       <Header />
       
       <div className="max-w-6xl mx-auto px-4 py-8">
@@ -142,10 +142,10 @@ export default function TokenVerificationPage() {
         >
           {/* Header */}
           <div className="text-center space-y-4">
-            <h1 className="text-3xl font-bold text-gray-900">
+            <h1 className="text-3xl font-bold text-white">
               Token Metadata Manager
             </h1>
-            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            <p className="text-lg text-gray-300 max-w-2xl mx-auto">
               Verify and update metadata for your launched tokens. Ensure they are visible in Solana wallets.
               This tool works with SPL Token-2022 metadata interface used by Let's Cook launchpad.
             </p>
@@ -153,13 +153,13 @@ export default function TokenVerificationPage() {
 
           {/* Tab Navigation */}
           <div className="flex justify-center">
-            <div className="bg-white rounded-lg p-1 border border-gray-200">
+            <div className="bg-gray-800 rounded-lg p-1 border border-gray-600">
               <button
                 onClick={() => setActiveTab('verify')}
                 className={`px-6 py-2 rounded-md transition-colors ${
                   activeTab === 'verify'
                     ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 hover:text-gray-900'
+                    : 'text-gray-300 hover:text-white'
                 }`}
               >
                 Verify Tokens
@@ -169,7 +169,7 @@ export default function TokenVerificationPage() {
                 className={`px-6 py-2 rounded-md transition-colors ${
                   activeTab === 'update'
                     ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 hover:text-gray-900'
+                    : 'text-gray-300 hover:text-white'
                 }`}
               >
                 Update Metadata
@@ -181,8 +181,8 @@ export default function TokenVerificationPage() {
           {activeTab === 'verify' ? (
             <>
               {/* Single Token Verification */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <div className="bg-gray-800 rounded-lg shadow-sm border border-gray-600 p-6">
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-white">
                   <Search className="w-5 h-5" />
                   Verify Single Token
                 </h2>
@@ -192,8 +192,8 @@ export default function TokenVerificationPage() {
           ) : (
             <>
               {/* Token Metadata Updater */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <div className="bg-gray-800 rounded-lg shadow-sm border border-gray-600 p-6">
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-white">
                   <RefreshCw className="w-5 h-5" />
                   Update Token Metadata
                 </h2>
@@ -204,8 +204,8 @@ export default function TokenVerificationPage() {
 
           {/* Recent Tokens - Only show in verify tab */}
           {recentTokens.length > 0 && activeTab === 'verify' && (
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+            <div className="bg-gray-800 rounded-lg shadow-sm border border-gray-600 p-6">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-white">
                 <RefreshCw className="w-5 h-5" />
                 Recent Tokens
               </h2>
@@ -214,12 +214,12 @@ export default function TokenVerificationPage() {
                   <button
                     key={index}
                     onClick={() => handleSingleVerify(tokenMint)}
-                    className="p-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="p-3 text-left border border-gray-600 rounded-lg hover:bg-gray-700 transition-colors"
                   >
-                    <div className="font-mono text-sm text-gray-600 break-all">
+                    <div className="font-mono text-sm text-gray-300 break-all">
                       {tokenMint.slice(0, 8)}...{tokenMint.slice(-8)}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">Click to verify</div>
+                    <div className="text-xs text-gray-400 mt-1">Click to verify</div>
                   </button>
                 ))}
               </div>
@@ -228,13 +228,13 @@ export default function TokenVerificationPage() {
 
           {/* Batch Verification Results - Only show in verify tab */}
           {verificationResults.length > 0 && activeTab === 'verify' && (
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-gray-800 rounded-lg shadow-sm border border-gray-600 p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold flex items-center gap-2">
+                <h2 className="text-xl font-semibold flex items-center gap-2 text-white">
                   <Eye className="w-5 h-5" />
                   Verification Results
                 </h2>
-                <div className="text-sm text-gray-500">
+                <div className="text-sm text-gray-400">
                   {verificationResults.length} token{verificationResults.length !== 1 ? 's' : ''} verified
                 </div>
               </div>
@@ -294,31 +294,31 @@ export default function TokenVerificationPage() {
           )}
 
           {/* Information Panel */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-blue-900 mb-3">
+          <div className="bg-blue-900 border border-blue-700 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-blue-100 mb-3">
               How Token Metadata Works
             </h3>
-            <div className="space-y-3 text-blue-800">
+            <div className="space-y-3 text-blue-200">
               <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-5 h-5 mt-0.5 text-blue-600" />
+                <CheckCircle2 className="w-5 h-5 mt-0.5 text-blue-400" />
                 <div>
                   <strong>SPL Token-2022:</strong> Your backend uses SPL Token-2022 with built-in metadata interface
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-5 h-5 mt-0.5 text-blue-600" />
+                <CheckCircle2 className="w-5 h-5 mt-0.5 text-blue-400" />
                 <div>
                   <strong>Pinata IPFS:</strong> Metadata JSON is stored on IPFS via Pinata for permanent access
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-5 h-5 mt-0.5 text-blue-600" />
+                <CheckCircle2 className="w-5 h-5 mt-0.5 text-blue-400" />
                 <div>
                   <strong>Wallet Visibility:</strong> Tokens with proper metadata appear correctly in Solana wallets
                 </div>
               </div>
               <div className="flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 mt-0.5 text-blue-600" />
+                <AlertCircle className="w-5 h-5 mt-0.5 text-blue-400" />
                 <div>
                   <strong>If Issues:</strong> Check that your backend properly initialized the token with metadata
                 </div>

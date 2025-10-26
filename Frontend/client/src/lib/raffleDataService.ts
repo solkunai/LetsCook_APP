@@ -95,13 +95,52 @@ export class RaffleDataService {
     try {
       console.log('🎫 Fetching raffle data for ID:', raffleId);
       
-      // Get the launch account from blockchain
+      // Get the launch account from blockchain with retry mechanism
       const launchAccount = new PublicKey(raffleId);
-      const accountInfo = await this.connection.getAccountInfo(launchAccount);
+      let accountInfo = await this.connection.getAccountInfo(launchAccount);
       
+      // If account not found, retry with delays (newly created accounts need time to be indexed)
       if (!accountInfo) {
-        console.log('❌ Raffle account not found on blockchain');
-        return null;
+        console.log('⏳ Account not found immediately, retrying with delays...');
+        
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          console.log(`🔄 Attempt ${attempt}/5: Waiting ${attempt * 2} seconds...`);
+          await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+          
+          accountInfo = await this.connection.getAccountInfo(launchAccount);
+          if (accountInfo) {
+            console.log(`✅ Account found on attempt ${attempt}`);
+            break;
+          }
+        }
+        
+        if (!accountInfo) {
+          console.log('❌ Raffle account not found on blockchain after retries');
+          
+          // Try to find the account by checking recent transactions
+          console.log('🔍 Attempting to find account via transaction history...');
+          try {
+            const signatures = await this.connection.getSignaturesForAddress(launchAccount, { limit: 5 });
+            if (signatures.length > 0) {
+              console.log('📊 Found transaction signatures for this account:', signatures.length);
+              console.log('📊 Latest signature:', signatures[0].signature);
+              
+              // Try to get account info one more time after finding transactions
+              accountInfo = await this.connection.getAccountInfo(launchAccount);
+              if (accountInfo) {
+                console.log('✅ Account found after checking transaction history');
+              }
+            } else {
+              console.log('❌ No transaction history found for this account');
+            }
+          } catch (txError) {
+            console.log('❌ Error checking transaction history:', txError);
+          }
+          
+          if (!accountInfo) {
+            return null;
+          }
+        }
       }
 
       console.log('📊 Account found, data length:', accountInfo.data.length);
@@ -109,12 +148,30 @@ export class RaffleDataService {
       console.log('📊 Raw data (first 50 bytes):', Array.from(accountInfo.data.slice(0, 50)).map(b => b.toString(16).padStart(2, '0')).join(' '));
       
       // Use the launch service to fetch all launches and find the specific one
-      const allLaunches = await launchDataService.getAllLaunches();
-      const launchData = allLaunches.find(launch => launch.id === raffleId);
+      let allLaunches = await launchDataService.getAllLaunches();
+      let launchData = allLaunches.find(launch => launch.id === raffleId);
       
+      // If launch not found in the first fetch, retry with delays
       if (!launchData) {
-        console.log('❌ Launch not found in fetched launches');
-        return null;
+        console.log('⏳ Launch not found in first fetch, retrying...');
+        
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          console.log(`🔄 Launch fetch attempt ${attempt}/3: Waiting ${attempt * 3} seconds...`);
+          await new Promise(resolve => setTimeout(resolve, attempt * 3000));
+          
+          allLaunches = await launchDataService.getAllLaunches();
+          launchData = allLaunches.find(launch => launch.id === raffleId);
+          
+          if (launchData) {
+            console.log(`✅ Launch found on attempt ${attempt}`);
+            break;
+          }
+        }
+        
+        if (!launchData) {
+          console.log('❌ Launch not found in fetched launches after retries');
+          return null;
+        }
       }
       
       // Try to get creator from transaction history (since raffle accounts are typically PDAs owned by the program)
@@ -136,7 +193,42 @@ export class RaffleDataService {
       }
 
       console.log('✅ Parsed raffle data:', launchData);
+      console.log('🔍 Date debugging:', {
+        launchDate: launchData.launchDate,
+        launchDateType: typeof launchData.launchDate,
+        launchDateIsDate: launchData.launchDate instanceof Date,
+        endDate: launchData.endDate,
+        endDateType: typeof launchData.endDate,
+        endDateIsDate: launchData.endDate instanceof Date
+      });
       
+      // Helper function to safely convert to Date and get time
+      const safeGetTime = (dateValue: any): number => {
+        try {
+          if (dateValue instanceof Date) {
+            return dateValue.getTime();
+          } else if (typeof dateValue === 'number') {
+            return dateValue;
+          } else if (typeof dateValue === 'string') {
+            return new Date(dateValue).getTime();
+          } else {
+            console.warn('⚠️ Invalid date value:', dateValue);
+            return Date.now(); // Fallback to current time
+          }
+        } catch (error) {
+          console.warn('⚠️ Error converting date:', error);
+          return Date.now(); // Fallback to current time
+        }
+      };
+
+      // Safely get launch and end times
+      const launchTime = safeGetTime(launchData.launchDate);
+      const endTime = safeGetTime(launchData.endDate);
+      
+      // Calculate duration in hours
+      const durationMs = endTime - launchTime;
+      const durationHours = Math.floor(durationMs / (1000 * 3600));
+
       // Convert LaunchData to RaffleData format
       const raffleData: RaffleData = {
         id: raffleId,
@@ -148,10 +240,10 @@ export class RaffleDataService {
         ticketPrice: launchData.ticketPrice || 0.1, // Use ticketPrice from LaunchData
         maxTickets: launchData.maxTickets || 1000,
         soldTickets: 0, // Will be updated from blockchain state
-        raffleDuration: Math.floor((launchData.endDate.getTime() - launchData.launchDate.getTime()) / (1000 * 3600)), // Hours
+        raffleDuration: durationHours, // Hours
         winnerCount: launchData.maxTickets || 1000, // For now, same as max tickets
-        startTime: launchData.launchDate.getTime(),
-        endTime: launchData.endDate.getTime(),
+        startTime: launchTime,
+        endTime: endTime,
         status: launchData.status === 'live' ? 'active' : launchData.status === 'ended' ? 'ended' : 'upcoming',
         creator: creatorAddress,
         totalSupply: launchData.totalSupply,

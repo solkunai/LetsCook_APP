@@ -82,13 +82,14 @@ export class LaunchDataService {
         const now = Date.now();
         
         if (launch.launchType === 'instant') {
-          // Instant launches are always live once created
           status = 'live';
         } else if (launch.launchType === 'raffle') {
-          // Raffle launches have specific start/end times
-          if (now < launch.launchDate.getTime()) {
+          const launchTime = launch.launchDate instanceof Date ? launch.launchDate.getTime() : new Date(launch.launchDate).getTime();
+          const endTime = launch.endDate instanceof Date ? launch.endDate.getTime() : new Date(launch.endDate).getTime();
+          
+          if (now < launchTime) {
             status = 'upcoming';
-          } else if (now > launch.endDate.getTime()) {
+          } else if (now > endTime) {
             status = 'ended';
           } else {
             status = 'live';
@@ -178,114 +179,12 @@ export class LaunchDataService {
   }
 
   /**
-   * Get mock launches for development/testing
+   * Get mock launches for development/testing - REMOVED
+   * All launches should come from real blockchain data only
    */
   private getMockLaunches(): LaunchData[] {
-    const now = Date.now();
-    const oneDayMs = 24 * 60 * 60 * 1000;
-    
-    return [
-      {
-        id: 'mock-instant-1',
-        name: 'ChefCoin',
-        symbol: 'CHEF',
-        description: 'The ultimate cooking token for food enthusiasts',
-        image: 'https://api.dicebear.com/7.x/shapes/svg?seed=chef&backgroundColor=1e293b&shapeColor=f59e0b',
-        launchType: 'instant',
-        status: 'live',
-        totalSupply: 1000000,
-        decimals: 9,
-        initialPrice: 0.01,
-        currentPrice: 0.012,
-        priceChange24h: 20.5,
-        volume24h: 15000,
-        marketCap: 12000,
-        liquidity: 5000,
-        launchDate: new Date(now - oneDayMs),
-        endDate: new Date(now + oneDayMs),
-        creator: '8fvPxVrPp1p3QGwjiFQVYg5xpBTVrWrarrUxQryftUZV',
-        hypeScore: 150,
-        participants: 89,
-        verified: true,
-        featured: true,
-        programId: 'ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ',
-        listingAccount: 'mock-listing-1',
-        launchDataAccount: 'mock-launch-1',
-        baseTokenMint: 'mock-token-1',
-        quoteTokenMint: 'So11111111111111111111111111111111111111112',
-        dexProvider: 0, // CookDEX
-        website: 'https://chefcoin.com',
-        twitter: 'https://twitter.com/chefcoin'
-      },
-      {
-        id: 'mock-raffle-1',
-        name: 'PizzaToken',
-        symbol: 'PIZZA',
-        description: 'Delicious pizza-themed token with community rewards',
-        image: 'https://api.dicebear.com/7.x/shapes/svg?seed=pizza&backgroundColor=1e293b&shapeColor=f59e0b',
-        launchType: 'raffle',
-        status: 'live',
-        totalSupply: 2000000,
-        decimals: 9,
-        initialPrice: 0.005,
-        currentPrice: 0.005,
-        priceChange24h: 0,
-        volume24h: 0,
-        marketCap: 10000,
-        liquidity: 0,
-        launchDate: new Date(now - oneDayMs),
-        endDate: new Date(now + 2 * oneDayMs),
-        creator: '8fvPxVrPp1p3QGwjiFQVYg5xpBTVrWrarrUxQryftUZV',
-        ticketPrice: 0.005,
-        maxTickets: 1000,
-        soldTickets: 450,
-        winnerCount: 50,
-        hypeScore: 89,
-        participants: 450,
-        verified: true,
-        featured: false,
-        programId: 'ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ',
-        listingAccount: 'mock-listing-2',
-        launchDataAccount: 'mock-launch-2',
-        baseTokenMint: 'mock-token-2',
-        quoteTokenMint: 'So11111111111111111111111111111111111111112',
-        dexProvider: 1, // Raydium
-        website: 'https://pizzatoken.com',
-        twitter: 'https://twitter.com/pizzatoken'
-      },
-      {
-        id: 'mock-instant-2',
-        name: 'CryptoKitchen',
-        symbol: 'KITCHEN',
-        description: 'Revolutionary kitchen automation token',
-        image: 'https://api.dicebear.com/7.x/shapes/svg?seed=kitchen&backgroundColor=1e293b&shapeColor=f59e0b',
-        launchType: 'instant',
-        status: 'live',
-        totalSupply: 500000,
-        decimals: 9,
-        initialPrice: 0.02,
-        currentPrice: 0.018,
-        priceChange24h: -10.2,
-        volume24h: 8500,
-        marketCap: 9000,
-        liquidity: 3000,
-        launchDate: new Date(now - 2 * oneDayMs),
-        endDate: new Date(now + oneDayMs),
-        creator: '8fvPxVrPp1p3QGwjiFQVYg5xpBTVrWrarrUxQryftUZV',
-        hypeScore: 67,
-        participants: 34,
-        verified: false,
-        featured: false,
-        programId: 'ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ',
-        listingAccount: 'mock-listing-3',
-        launchDataAccount: 'mock-launch-3',
-        baseTokenMint: 'mock-token-3',
-        quoteTokenMint: 'So11111111111111111111111111111111111111112',
-        dexProvider: 0, // CookDEX
-        website: 'https://cryptokitchen.io',
-        twitter: 'https://twitter.com/cryptokitchen'
-      }
-    ];
+    // No mock data - only real blockchain data
+    return [];
   }
 
   /**
@@ -293,12 +192,7 @@ export class LaunchDataService {
    */
   async getLaunchById(id: string): Promise<LaunchData | null> {
     try {
-      // First check if it's a mock launch
-      if (id.startsWith('mock-')) {
-        const mockLaunches = this.getMockLaunches();
-        return mockLaunches.find(launch => launch.id === id) || null;
-      }
-      
+      // Only fetch real blockchain data - no mock data
       const blockchainLaunch = await blockchainIntegrationService.getLaunchByAddress(id);
       if (!blockchainLaunch) {
         return null;
@@ -308,14 +202,36 @@ export class LaunchDataService {
       let status: 'upcoming' | 'live' | 'ended' = 'live';
       const now = Date.now();
       
+      // Helper function to safely get time from date
+      const safeGetTime = (dateValue: any): number => {
+        try {
+          if (dateValue instanceof Date) {
+            return dateValue.getTime();
+          } else if (typeof dateValue === 'number') {
+            return dateValue;
+          } else if (typeof dateValue === 'string') {
+            return new Date(dateValue).getTime();
+          } else {
+            console.warn('⚠️ Invalid date value in launchDataService:', dateValue);
+            return Date.now();
+          }
+        } catch (error) {
+          console.warn('⚠️ Error converting date in launchDataService:', error);
+          return Date.now();
+        }
+      };
+
       if (blockchainLaunch.launchType === 'instant') {
         // Instant launches are always live once created
         status = 'live';
       } else if (blockchainLaunch.launchType === 'raffle') {
         // Raffle launches have specific start/end times
-        if (now < blockchainLaunch.launchDate.getTime()) {
+        const launchTime = safeGetTime(blockchainLaunch.launchDate);
+        const endTime = safeGetTime(blockchainLaunch.endDate);
+        
+        if (now < launchTime) {
           status = 'upcoming';
-        } else if (now > blockchainLaunch.endDate.getTime()) {
+        } else if (now > endTime) {
           status = 'ended';
         } else {
           status = 'live';

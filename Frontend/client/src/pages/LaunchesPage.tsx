@@ -37,24 +37,10 @@ const LaunchesPage: React.FC = () => {
   const fetchLaunches = async () => {
     setLoading(true);
     try {
-      console.log('🔍 Fetching launches from blockchain...');
       const fetchedLaunches = await launchService.fetchAllLaunches();
-      
-      // Debug: Log each launch's image URL
-      console.log('📊 Launch data with images:');
-      fetchedLaunches.forEach((launch, index) => {
-        console.log(`Launch ${index + 1}: ${launch.name}`);
-        console.log(`  - Image URL: "${launch.image}"`);
-        console.log(`  - Status: ${launch.status}`);
-        console.log(`  - Type: ${launch.launchType}`);
-      });
-      
       setLaunches(fetchedLaunches);
       setFilteredLaunches(fetchedLaunches);
-      console.log('✅ Fetched', fetchedLaunches.length, 'launches');
-      console.log('📝 Note: Non-graduated raffles will be filtered out from main launches page');
     } catch (error) {
-      console.error('Error fetching launches:', error);
       toast({
         title: "Error",
         description: "Failed to fetch launches. Please try again.",
@@ -101,9 +87,13 @@ const LaunchesPage: React.FC = () => {
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'newest':
-          return b.launchDate.getTime() - a.launchDate.getTime();
+          const bTime = a.launchDate instanceof Date ? a.launchDate.getTime() : new Date(a.launchDate).getTime();
+          const aTime = b.launchDate instanceof Date ? b.launchDate.getTime() : new Date(b.launchDate).getTime();
+          return aTime - bTime;
         case 'oldest':
-          return a.launchDate.getTime() - b.launchDate.getTime();
+          const aTimeOld = a.launchDate instanceof Date ? a.launchDate.getTime() : new Date(a.launchDate).getTime();
+          const bTimeOld = b.launchDate instanceof Date ? b.launchDate.getTime() : new Date(b.launchDate).getTime();
+          return aTimeOld - bTimeOld;
         case 'price':
           return b.currentPrice - a.currentPrice;
         case 'volume':
@@ -124,9 +114,10 @@ const LaunchesPage: React.FC = () => {
   }, []);
 
   // Utility functions
-  const formatTimeAgo = (date: Date): string => {
+  const formatTimeAgo = (date: Date | number): string => {
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    const dateObj = date instanceof Date ? date : new Date(date);
+    const diffInMinutes = Math.floor((now.getTime() - dateObj.getTime()) / (1000 * 60));
     
     if (diffInMinutes < 1) return 'Just now';
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
@@ -283,8 +274,8 @@ const LaunchesPage: React.FC = () => {
             <VotingComponent
               launchId={launch.id}
               currentVotes={{
-                upvotes: Math.floor(Math.random() * 50) + 10, // Mock data
-                downvotes: Math.floor(Math.random() * 10) + 1
+                upvotes: launch.hypeScore || 0,
+                downvotes: Math.max(0, (launch.participants || 0) - (launch.hypeScore || 0))
               }}
               size="sm"
               onVote={(vote) => {

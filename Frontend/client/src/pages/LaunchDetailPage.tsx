@@ -41,7 +41,7 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Connection, PublicKey, Transaction, SystemProgram, Keypair } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import { toast } from '@/hooks/use-toast';
 import { launchDataService } from '@/lib/launchDataService';
 import { LaunchData } from '@/lib/launchDataService';
@@ -189,28 +189,30 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
     
     setBalanceLoading(true);
     try {
-      // Fetch SOL balance
-      const solBalanceLamports = await connection.getBalance(publicKey);
-      setSolBalance(solBalanceLamports / 1e9);
+      const solBal = await connection.getBalance(publicKey);
+      setSolBalance(solBal / 1e9);
       
-      // Fetch token balance
-      try {
-        const tokenMint = new PublicKey(launch.baseTokenMint);
-        const userTokenAccount = await getAssociatedTokenAddressSync(
-          tokenMint,
-          publicKey,
-          false
-        );
-        
-        const tokenAccountInfo = await connection.getTokenAccountBalance(userTokenAccount);
-        setTokenBalance(parseFloat(tokenAccountInfo.value.uiAmountString || '0'));
-      } catch (error) {
-        // Token account might not exist yet
+      const mintInfo = await connection.getAccountInfo(new PublicKey(launch.baseTokenMint));
+      const isToken2022 = mintInfo?.owner.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
+      const tokenProgram = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+      
+      const tokenAccount = getAssociatedTokenAddressSync(
+        new PublicKey(launch.baseTokenMint),
+        publicKey,
+        false,
+        tokenProgram
+      );
+      
+      const accountInfo = await connection.getAccountInfo(tokenAccount);
+      if (accountInfo && accountInfo.data.length > 0) {
+        const amount = accountInfo.data.readBigUInt64LE(64);
+        setTokenBalance(Number(amount) / 1e9);
+      } else {
         setTokenBalance(0);
-        console.log('Token account not found, balance is 0');
       }
     } catch (error) {
-      console.error('Error fetching wallet balances:', error);
+      setSolBalance(0);
+      setTokenBalance(0);
     } finally {
       setBalanceLoading(false);
     }
@@ -300,7 +302,13 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
     try {
       const dexProvider = launch.dexProvider === 0 ? 'cook' : 'raydium';
       
-      if (tradingMode === 'buy') {
+      // Add timeout to prevent hanging (60 seconds)
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Trade operation timed out after 60 seconds')), 60000)
+      );
+      
+      const tradePromise = (async () => {
+        if (tradingMode === 'buy') {
         const result = await realLaunchService.buyTokensAMM(
           launch.baseTokenMint,
           publicKey.toBase58(),
@@ -318,6 +326,7 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
           throw new Error(result.error || 'Failed to buy tokens');
         }
       } else {
+        console.log('🔄 Starting sell transaction...');
         const result = await realLaunchService.sellTokensAMM(
           launch.baseTokenMint,
           publicKey.toBase58(),
@@ -325,6 +334,8 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
           signTransaction,
           dexProvider
         );
+        
+        console.log('📊 Sell result:', result);
         
         if (result.success) {
           toast({
@@ -341,6 +352,10 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
       setAmount('');
       setQuotePrice(null);
       setEstimatedOutput(null);
+      })();
+      
+      // Race between trade and timeout
+      await Promise.race([tradePromise, timeoutPromise]);
       
     } catch (error) {
       console.error('Trade error:', error);
@@ -1371,7 +1386,7 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
                         <div>
                           <div className="text-sm text-white">Launched</div>
                           <div className="text-xs text-slate-400">
-                            {launch.launchDate.toLocaleDateString()} at {launch.launchDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(launch.launchDate).toLocaleDateString()} at {new Date(launch.launchDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </div>
                       </div>

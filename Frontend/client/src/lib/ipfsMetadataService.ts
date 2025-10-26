@@ -266,25 +266,58 @@ export class IPFSMetadataService {
     try {
       console.log('🔍 Looking for metadata for raffle ID:', raffleId);
       
-      // Try known metadata CID first (from your logs)
-      const knownCid = 'bafkreif54ucmil3ohaxqmgwmd674ceyku5qw4ukh6n3ohcy4gqb43wlnc4';
-      const url = `https://gateway.pinata.cloud/ipfs/${knownCid}`;
+      // First, try to get the metadata from the blockchain integration service
+      // which should have the actual metadata URI stored in the launch data
+      try {
+        const { blockchainIntegrationService } = await import('./blockchainIntegrationService');
+        const launchData = await blockchainIntegrationService.getLaunchByAddress(raffleId);
+        
+        if (launchData && launchData.metadataUri) {
+          console.log('🔍 Found metadata URI in launch data:', launchData.metadataUri);
+          
+          // Try to fetch the metadata from the URI
+          const response = await fetch(launchData.metadataUri, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+            },
+            signal: AbortSignal.timeout(10000) // 10 second timeout
+          });
+          
+          if (response.ok) {
+            const metadata = await response.json();
+            console.log('✅ Found metadata from launch URI:', metadata);
+            return metadata;
+          } else {
+            console.log(`❌ Metadata URI failed:`, response.status, response.statusText);
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ Could not fetch metadata from launch data:', error);
+      }
       
-      console.log('🔍 Fetching from Pinata:', url);
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-        signal: AbortSignal.timeout(10000) // 10 second timeout
-      });
+      // Fallback: Try to look up metadata in localStorage or other storage
+      // This is a temporary solution until we have proper metadata storage
+      const storageKey = `raffle_metadata_${raffleId}`;
+      const storedCid = localStorage.getItem(storageKey);
       
-      if (response.ok) {
-        const metadata = await response.json();
-        console.log('✅ Found metadata from Pinata:', metadata);
-        return metadata;
-      } else {
-        console.log(`❌ Pinata failed:`, response.status, response.statusText);
+      if (storedCid) {
+        console.log('🔍 Found stored metadata CID:', storedCid);
+        const url = `https://gateway.pinata.cloud/ipfs/${storedCid}`;
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+          signal: AbortSignal.timeout(10000)
+        });
+        
+        if (response.ok) {
+          const metadata = await response.json();
+          console.log('✅ Found metadata from stored CID:', metadata);
+          return metadata;
+        }
       }
       
       console.log('⚠️ No metadata found for raffle:', raffleId);

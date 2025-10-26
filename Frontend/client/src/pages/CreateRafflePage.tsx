@@ -28,10 +28,27 @@ import {
   Award
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { Connection, PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { 
+  createInitializeMintInstruction,
+  TOKEN_PROGRAM_ID, 
+  MINT_SIZE, 
+  TOKEN_2022_PROGRAM_ID,
+  getMintLen,
+  ExtensionType,
+  createInitializeMetadataPointerInstruction,
+  createInitializeInstruction as createInitializeMetadataInstruction,
+  createSetAuthorityInstruction,
+  AuthorityType,
+  TYPE_SIZE,
+  LENGTH_SIZE
+} from '@solana/spl-token';
+import { pack } from '@solana/spl-token-metadata';
 import { useLocation } from 'wouter';
 import { pinataService, uploadImageToIPFS } from '@/lib/pinataService';
+import { LaunchpadTokenMetadataService } from '@/lib/launchpadTokenMetadataService';
 import { ipfsMetadataService } from '@/lib/ipfsMetadataService';
+import { blockchainIntegrationService } from '@/lib/blockchainIntegrationService';
 import { toast } from '@/hooks/use-toast';
 import Header from '../components/Header';
 import DEXSelector from '../components/DEXSelector';
@@ -40,7 +57,6 @@ import { PROGRAM_ID, LetsCookProgram, LaunchInstruction } from '../lib/nativePro
 import { INSTRUCTION_DISCRIMINATORS } from '../lib/apiServices';
 import * as borsh from 'borsh';
 import { Buffer } from 'buffer';
-import { LaunchpadTokenMetadataService } from '@/lib/launchpadTokenMetadataService';
 
 const STEPS = ['basic', 'dex', 'config', 'social', 'review'];
 
@@ -316,6 +332,19 @@ export default function CreateRafflePage() {
     });
   };
 
+  // Helper function to check wallet balance
+  const checkWalletBalance = async () => {
+    if (!publicKey) return 0;
+    
+    try {
+      const balance = await connection.getBalance(publicKey);
+      return balance;
+    } catch (error) {
+      console.error('Failed to get wallet balance:', error);
+      return 0;
+    }
+  };
+
   const removeImage = () => {
     updateFormData('image', '');
     toast({
@@ -336,48 +365,239 @@ export default function CreateRafflePage() {
       return;
     }
 
+    // Debug wallet adapter
+    console.log('🔍 Wallet debug info:', {
+      connected,
+      publicKey: publicKey?.toBase58(),
+      walletName: wallet?.adapter?.name,
+      hasSendTransaction: !!sendTransaction,
+      walletAdapter: wallet?.adapter
+    });
+
+    // Check wallet balance before proceeding
+    const balance = await checkWalletBalance();
+    const balanceSOL = balance / LAMPORTS_PER_SOL;
+    console.log('💰 Wallet balance:', balanceSOL.toFixed(4), 'SOL');
+    
+    if (balanceSOL < 0.01) {
+      toast({
+        title: "Insufficient Balance",
+        description: `You need at least 0.01 SOL to create a raffle. Current balance: ${balanceSOL.toFixed(4)} SOL. Please add SOL to your wallet.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      // Generate keypairs for required accounts
-      const listingKeypair = Keypair.generate();
-      const launchDataKeypair = Keypair.generate();
+      // Generate keypair for base token mint (quote token is WSOL - not a custom token)
       const baseTokenMintKeypair = Keypair.generate();
-      const quoteTokenMintKeypair = Keypair.generate();
-      const teamKeypair = Keypair.generate();
+      // Quote token is WSOL (Wrapped SOL) - standard mint address
+      const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+      // Team wallet is the user's wallet address (where team allocations go)
+      const teamWallet = publicKey;
+
+      console.log('🔑 Generated keypairs:', {
+        baseTokenMint: baseTokenMintKeypair.publicKey.toBase58(),
+        quoteTokenMint: WSOL_MINT.toBase58(), // WSOL
+        team: teamWallet.toBase58()
+      });
+
+      // Create SPL Token-2022 with metadata
+      console.log('🪙 Creating SPL Token-2022 mint with metadata...');
+      
+      // Derive AMM PDA to use as mint authority
+      const [ammPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('amm'), baseTokenMintKeypair.publicKey.toBuffer()],
+        PROGRAM_ID
+      );
+      console.log('🔍 AMM PDA (mint authority):', ammPDA.toBase58());
+
+      // Create comprehensive token metadata for wallet visibility (same as instant launches)
+      console.log('🏷️ Creating comprehensive token metadata...');
+      let metadataResult;
+      try {
+        metadataResult = await LaunchpadTokenMetadataService.createTokenMetadata(
+          connection,
+          baseTokenMintKeypair.publicKey,
+          {
+            name: formData.name,
+            symbol: formData.symbol,
+            description: formData.description || `${formData.name} - Raffle launched on Let's Cook`,
+            image: formData.image || '',
+            website: formData.website,
+            twitter: formData.twitter,
+            telegram: formData.telegram,
+            discord: formData.discord,
+            launchType: 'raffle',
+            creatorWallet: publicKey.toBase58()
+          }
+        );
+        
+        if (metadataResult.success) {
+          console.log('✅ Token metadata created successfully');
+          console.log('📊 Metadata URI:', metadataResult.metadataUri);
+        } else {
+          throw new Error(metadataResult.error || 'Failed to create token metadata');
+        }
+      } catch (error) {
+        console.error('❌ Error creating token metadata:', error);
+        throw new Error('Failed to create token metadata for raffle launch');
+      }
+      
+      // Now create the base token mint account with proper space calculation
+      console.log('🏗️ Creating base token mint account with calculated space...');
+      const extensions = [ExtensionType.MetadataPointer];
+      // Calculate the actual metadata size from the JSON we created
+      const metadataSize = TYPE_SIZE + LENGTH_SIZE + pack({
+        name: formData.name,
+        symbol: formData.symbol,
+        uri: metadataResult.metadataUri || '',
+        updateAuthority: publicKey,
+        mint: baseTokenMintKeypair.publicKey,
+        additionalMetadata: []
+      }).length;
+      
+      // Create account with space for mint + metadata pointer extension only
+      // But fund it with enough lamports for the final size (including metadata content)
+      const mintLen = getMintLen(extensions);
+      const totalSpace = mintLen + metadataSize;
+      const baseTokenMintLamports = await connection.getMinimumBalanceForRentExemption(totalSpace);
+      
+      const tokenMintTransaction = new Transaction();
+      
+      tokenMintTransaction.add(
+        SystemProgram.createAccount({
+          fromPubkey: publicKey,
+          newAccountPubkey: baseTokenMintKeypair.publicKey,
+          space: mintLen,
+          lamports: baseTokenMintLamports,
+          programId: TOKEN_2022_PROGRAM_ID,
+        })
+      );
+
+      // Initialize metadata pointer extension (points to the mint itself for metadata)
+      tokenMintTransaction.add(
+        createInitializeMetadataPointerInstruction(
+          baseTokenMintKeypair.publicKey, // mint
+          publicKey, // authority (user wallet)
+          baseTokenMintKeypair.publicKey, // metadata address (self)
+          TOKEN_2022_PROGRAM_ID
+        )
+      );
+
+      // Initialize base token mint with user as mint authority (can be transferred to AMM PDA later)
+      tokenMintTransaction.add(
+        createInitializeMintInstruction(
+          baseTokenMintKeypair.publicKey, // mint
+          formData.decimals, // decimals
+          publicKey, // mint authority (user wallet)
+          publicKey, // freeze authority (user)
+          TOKEN_2022_PROGRAM_ID
+        )
+      );
+      
+      // Initialize the metadata on the Token-2022 mint with the actual IPFS URI
+      console.log('🏷️ Initializing metadata on Token-2022 mint with IPFS URI...');
+      try {
+        tokenMintTransaction.add(
+          createInitializeMetadataInstruction({
+            programId: TOKEN_2022_PROGRAM_ID,
+            mint: baseTokenMintKeypair.publicKey,
+            metadata: baseTokenMintKeypair.publicKey, // metadata stored in mint itself
+            mintAuthority: publicKey, // user wallet (will be transferred to AMM PDA later)
+            updateAuthority: publicKey, // user wallet
+            name: formData.name,
+            symbol: formData.symbol,
+            uri: metadataResult.metadataUri || ''
+          })
+        );
+        console.log('✅ Metadata initialization instruction added with IPFS URI');
+      } catch (error) {
+        console.warn('⚠️ Failed to add metadata initialization instruction:', error);
+      }
+
+      // Quote token is WSOL (already exists on-chain), no need to create it
+      // WSOL mint: So11111111111111111111111111111111111111112
+
+      // Send token mint transaction (only for base token)
+      const tokenMintSignature = await sendTransaction(tokenMintTransaction, connection, { 
+        signers: [baseTokenMintKeypair]
+      });
+      console.log('✅ Base token mint created and initialized:', tokenMintSignature);
+
+      // Transfer mint authority to AMM PDA
+      console.log('🔄 Transferring mint authority to AMM PDA...');
+      const transferAuthorityTransaction = new Transaction();
+      transferAuthorityTransaction.add(
+        createSetAuthorityInstruction(
+          baseTokenMintKeypair.publicKey,
+          publicKey,
+          AuthorityType.MintTokens,
+          ammPDA,
+          [],
+          TOKEN_2022_PROGRAM_ID
+        )
+      );
+
+      const transferSignature = await sendTransaction(transferAuthorityTransaction, connection);
+      console.log('✅ Mint authority transferred to AMM PDA:', transferSignature);
+
+      // Wait for token mint transaction to be fully processed
+      console.log('⏳ Waiting for token mint transaction to be fully processed...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       const transaction = new Transaction();
 
-      // Create all required accounts
-      const accounts = [
-        { keypair: listingKeypair, space: 200, name: 'listing' },
-        { keypair: launchDataKeypair, space: 300, name: 'launchData' },
-        { keypair: baseTokenMintKeypair, space: 82, name: 'baseTokenMint' },
-        { keypair: quoteTokenMintKeypair, space: 82, name: 'quoteTokenMint' },
-        { keypair: teamKeypair, space: 100, name: 'team' },
-      ];
+      // Generate keypairs for listing and launchData accounts (not PDAs for old processor)
+      const listingKeypair = Keypair.generate();
+      const launchDataKeypair = Keypair.generate();
+      
+      console.log('🎯 Generated account keypairs:', {
+        listing: listingKeypair.publicKey.toBase58(),
+        launchData: launchDataKeypair.publicKey.toBase58(),
+        team: teamWallet.toBase58() // Team wallet is the user's wallet
+      });
+      
+      // The old processor.rs code expects accounts to exist - we need to create them
+      // Calculate the space needed for listing and launch_data accounts
+      // LaunchData struct includes dynamic fields (strings, vectors) that can be large
+      const listingSpace = 500; // Sufficient space for listing account with metadata
+      const launchDataSpace = 600; // Sufficient space for launch_data account (needs at least 472 bytes)
+      
+      const listingLamports = await connection.getMinimumBalanceForRentExemption(listingSpace);
+      const launchDataLamports = await connection.getMinimumBalanceForRentExemption(launchDataSpace);
+      
+      transaction.add(
+        SystemProgram.createAccount({
+          fromPubkey: publicKey,
+          newAccountPubkey: listingKeypair.publicKey,
+          space: listingSpace,
+          lamports: listingLamports,
+          programId: PROGRAM_ID,
+        })
+      );
+      
+      transaction.add(
+        SystemProgram.createAccount({
+          fromPubkey: publicKey,
+          newAccountPubkey: launchDataKeypair.publicKey,
+          space: launchDataSpace,
+          lamports: launchDataLamports,
+          programId: PROGRAM_ID,
+        })
+      );
+      
+      console.log('🏗️ Added account creation instructions for listing and launchData accounts');
 
-      // Add account creation instructions
-      for (const account of accounts) {
-        const lamports = await connection.getMinimumBalanceForRentExemption(account.space);
-        transaction.add(
-          SystemProgram.createAccount({
-            fromPubkey: publicKey,
-            newAccountPubkey: account.keypair.publicKey,
-            space: account.space,
-            lamports,
-            programId: PROGRAM_ID,
-          })
-        );
-      }
-
-      // Create the raffle launch instruction first (without transfer to reduce size)
+      // Create the raffle launch instruction
       console.log('🎫 Creating raffle launch...');
       
       const createLaunchArgs = {
         name: formData.name,
         symbol: formData.symbol,
-        uri: formData.website || '',
+        uri: metadataResult.metadataUri || '', // Use the IPFS metadata URI from Token 2022
         icon: formData.image ? extractIPFSHash(formData.image) : '',
         banner: formData.banner ? extractIPFSHash(formData.banner) : '',
         total_supply: formData.totalSupply,
@@ -403,9 +623,9 @@ export default function CreateRafflePage() {
       const optimizedCreateArgs = {
         name: createLaunchArgs.name.substring(0, 16), // Limit to 16 chars (reduced from 20)
         symbol: createLaunchArgs.symbol.substring(0, 4), // Limit to 4 chars (reduced from 6)
-        uri: '', // Empty to save space
-      icon: '', // Will be updated after raffle creation
-      banner: '', // Will be updated after raffle creation
+        uri: createLaunchArgs.uri.substring(0, 50), // Limit URI but keep metadata link
+        icon: createLaunchArgs.icon, // Keep the IPFS hash
+        banner: createLaunchArgs.banner, // Keep the IPFS hash
         total_supply: createLaunchArgs.total_supply,
         decimals: createLaunchArgs.decimals,
         launch_date: createLaunchArgs.launch_date,
@@ -449,28 +669,103 @@ export default function CreateRafflePage() {
         }
       };
 
+      // Derive PDAs for cook data, cook PDA, and token accounts
+      // DATA_SEED = 7571427 (4-byte little-endian)
+      const DATA_SEED = 7571427;
+      const dataSeedBuffer = Buffer.allocUnsafe(4);
+      dataSeedBuffer.writeUInt32LE(DATA_SEED, 0);
+      
+      // SOL_SEED = 59957379 (4-byte little-endian)
+      const SOL_SEED = 59957379;
+      const solSeedBuffer = Buffer.allocUnsafe(4);
+      solSeedBuffer.writeUInt32LE(SOL_SEED, 0);
+      
+      const [cookDataPda] = PublicKey.findProgramAddressSync(
+        [dataSeedBuffer],
+        PROGRAM_ID
+      );
+      
+      const [cookPdaPda] = PublicKey.findProgramAddressSync(
+        [solSeedBuffer],
+        PROGRAM_ID
+      );
+      
+      // Derive launchQuote address (seeded account, not PDA)
+      // Using first 32 characters of base_token_mint base58 as seed
+      const mintSeed = baseTokenMintKeypair.publicKey.toBase58().substring(0, 32);
+      // Seeded address formula: seededPubkey = createWithSeed(basePubkey, seed, program)
+      const launchQuoteResult = PublicKey.createWithSeed(
+        cookPdaPda,
+        mintSeed,
+        TOKEN_2022_PROGRAM_ID
+      );
+      const launchQuotePda = await launchQuoteResult;
+      
+      // Derive cookBaseToken PDA (ATA for cookPda)
+      const [cookBaseTokenPda] = PublicKey.findProgramAddressSync(
+        [
+          cookPdaPda.toBuffer(),
+          TOKEN_2022_PROGRAM_ID.toBuffer(),
+          baseTokenMintKeypair.publicKey.toBuffer(),
+        ],
+        new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+      );
+      
+      console.log('📊 Derived PDAs:', {
+        cookData: cookDataPda.toBase58(),
+        cookPda: cookPdaPda.toBase58(),
+        launchQuote: launchQuotePda.toBase58(),
+        cookBaseToken: cookBaseTokenPda.toBase58()
+      });
+
       // Use LetsCookProgram.createRaffleInstruction for raffle launches
       const createLaunchInstruction = LetsCookProgram.createRaffleInstruction(
         optimizedCreateArgs,
         {
           user: publicKey,
-          listing: listingKeypair.publicKey,
-          launchData: launchDataKeypair.publicKey,
-          quoteTokenMint: quoteTokenMintKeypair.publicKey,
-          launchQuote: publicKey, // Using user as placeholder
-          cookData: publicKey, // Using user as placeholder
-          cookPda: publicKey, // Using user as placeholder
+          listing: listingKeypair.publicKey, // Use generated keypair (old processor expects regular accounts)
+          launchData: launchDataKeypair.publicKey, // Use generated keypair (old processor expects regular accounts)
+          quoteTokenMint: WSOL_MINT, // WSOL (Wrapped SOL)
+          launchQuote: launchQuotePda,
+          cookData: cookDataPda,
+          cookPda: cookPdaPda,
           baseTokenMint: baseTokenMintKeypair.publicKey,
-          cookBaseToken: publicKey, // Using user as placeholder
-          team: teamKeypair.publicKey,
-          quoteTokenProgram: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'),
-          baseTokenProgram: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'),
+          cookBaseToken: cookBaseTokenPda,
+          team: teamWallet, // Team wallet is the user's wallet
+          quoteTokenProgram: TOKEN_2022_PROGRAM_ID,
+          baseTokenProgram: TOKEN_2022_PROGRAM_ID,
           associatedToken: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
           systemProgram: SystemProgram.programId,
         }
       );
 
       transaction.add(createLaunchInstruction);
+
+      // Debug: Log all instructions in the transaction
+      console.log('🔍 Transaction instructions summary:');
+      transaction.instructions.forEach((instruction, index) => {
+        console.log(`  Instruction ${index}:`, {
+          programId: instruction.programId.toBase58(),
+          keys: instruction.keys.length,
+          dataLength: instruction.data.length
+        });
+        
+        // Log account details for the CreateLaunch instruction (it's the last instruction in the transaction)
+        if (index === transaction.instructions.length - 1 && instruction.keys.length > 0) {
+          console.log('🔍 CreateLaunch instruction accounts:', {
+            '0-user': instruction.keys[0]?.pubkey.toBase58(),
+            '1-listing': instruction.keys[1]?.pubkey.toBase58(),
+            '2-launchData': instruction.keys[2]?.pubkey.toBase58(),
+            '3-quoteTokenMint': instruction.keys[3]?.pubkey.toBase58(),
+            '4-launchQuote': instruction.keys[4]?.pubkey.toBase58(),
+            '5-cookData': instruction.keys[5]?.pubkey.toBase58(),
+            '6-cookPda': instruction.keys[6]?.pubkey.toBase58(),
+            '7-baseTokenMint': instruction.keys[7]?.pubkey.toBase58(),
+            '8-cookBaseToken': instruction.keys[8]?.pubkey.toBase58(),
+            '9-team': instruction.keys[9]?.pubkey.toBase58(),
+          });
+        }
+      });
 
       // Skip initial liquidity for now to reduce transaction size
       // TODO: Add liquidity in a separate transaction if needed
@@ -487,19 +782,249 @@ export default function CreateRafflePage() {
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = publicKey;
 
-      // Sign the transaction with all keypairs
-      const keypairs = accounts.map(acc => acc.keypair);
-      transaction.sign(...keypairs);
+      // Sign with listing and launchData keypairs (they're being created)
+      transaction.sign(listingKeypair, launchDataKeypair);
+      console.log('🔍 Signed transaction with listing and launchData keypairs');
+      console.log('📝 Accounts being created:', {
+        listing: listingKeypair.publicKey.toBase58(),
+        launchData: launchDataKeypair.publicKey.toBase58()
+      });
 
       console.log('📤 Sending raffle creation transaction...');
+      console.log('🔍 Transaction details:', {
+        instructions: transaction.instructions.length,
+        signers: 2, // listing and launchData keypairs
+        feePayer: transaction.feePayer?.toBase58(),
+        recentBlockhash: transaction.recentBlockhash
+      });
 
-      // Sign and send transaction
-      const signature = await sendTransaction(transaction, connection);
-      console.log('✅ Raffle created:', signature);
-      console.log('📍 Launch data account:', launchDataKeypair.publicKey.toBase58());
+      // Debug: Log all public keys referenced in the transaction
+      const allPublicKeys = new Set<string>();
+      transaction.instructions.forEach((instruction, index) => {
+        console.log(`🔍 Instruction ${index}:`, {
+          programId: instruction.programId.toBase58(),
+          keys: instruction.keys.map(key => ({
+            pubkey: key.pubkey.toBase58(),
+            isSigner: key.isSigner,
+            isWritable: key.isWritable
+          }))
+        });
+        
+        instruction.keys.forEach(key => {
+          allPublicKeys.add(key.pubkey.toBase58());
+        });
+      });
 
-      // Wait for confirmation
-      await connection.confirmTransaction(signature, 'confirmed');
+      console.log('🔍 All public keys in transaction:', Array.from(allPublicKeys));
+      
+      // Check if all required signers are included (should only be user wallet)
+      const requiredSigners = Array.from(allPublicKeys).filter(pubkey => 
+        transaction.instructions.some(instruction => 
+          instruction.keys.some(key => key.pubkey.toBase58() === pubkey && key.isSigner)
+        )
+      );
+      
+      console.log('🔍 Required signers:', requiredSigners);
+      
+      // Verify that only the user wallet is required to sign
+      if (!requiredSigners.includes(publicKey.toBase58())) {
+        console.error('❌ User wallet not in required signers');
+        throw new Error('User wallet must be a signer');
+      }
+      
+      if (requiredSigners.length > 1) {
+        console.warn('⚠️ Additional signers required:', requiredSigners.filter(p => p !== publicKey.toBase58()));
+      }
+      
+      console.log('✅ All required signers are accounted for');
+
+      // Validate transaction structure (without serialization)
+      try {
+        // Validate all required fields
+        if (!transaction.recentBlockhash) {
+          throw new Error('Transaction missing recent blockhash');
+        }
+        if (!transaction.feePayer) {
+          throw new Error('Transaction missing fee payer');
+        }
+        if (transaction.instructions.length === 0) {
+          throw new Error('Transaction has no instructions');
+        }
+        
+        console.log('✅ Transaction structure validation passed');
+        
+      } catch (validationError) {
+        console.error('❌ Transaction validation failed:', validationError);
+        throw new Error(`Transaction validation failed: ${validationError}`);
+      }
+
+      // Sign and send transaction with better error handling
+      let signature: string;
+      try {
+        // Try with different options based on wallet type
+        const sendOptions = {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed' as const,
+          maxRetries: 3
+        };
+
+        console.log('🔄 Attempting to send transaction with options:', sendOptions);
+        
+        signature = await sendTransaction(transaction, connection, sendOptions);
+        console.log('✅ Raffle created:', signature);
+        console.log('📍 Launch data account:', launchDataKeypair.publicKey.toBase58());
+      } catch (sendError) {
+        console.error('❌ Send transaction error:', sendError);
+        
+        // Try alternative approach if the first attempt fails
+        if (sendError instanceof Error && sendError.message.includes('Unexpected error')) {
+          console.log('🔄 Retrying with alternative approach...');
+          try {
+            // Try with different options
+            const retryOptions = {
+              skipPreflight: true,
+              preflightCommitment: 'processed' as const,
+              maxRetries: 1
+            };
+            
+            signature = await sendTransaction(transaction, connection, retryOptions);
+            console.log('✅ Raffle created on retry:', signature);
+            console.log('📍 Launch data account:', launchDataKeypair.publicKey.toBase58());
+          } catch (retryError) {
+            console.error('❌ Retry also failed:', retryError);
+            throw new Error(`Transaction failed after retry: ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+          }
+        } else {
+          // Provide more specific error information
+          if (sendError instanceof Error) {
+            if (sendError.message.includes('User rejected')) {
+              throw new Error('Transaction was rejected by user');
+            } else if (sendError.message.includes('Insufficient funds')) {
+              throw new Error('Insufficient funds for transaction');
+            } else if (sendError.message.includes('Blockhash not found')) {
+              throw new Error('Transaction expired, please try again');
+            } else {
+              throw new Error(`Transaction failed: ${sendError.message}`);
+            }
+          } else {
+            throw new Error('Transaction failed with unknown error');
+          }
+        }
+      }
+
+      // Wait for confirmation and get detailed transaction info
+      console.log('⏳ Waiting for transaction confirmation...');
+      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+      console.log('📊 Transaction confirmation details:', {
+        signature,
+        confirmation,
+        success: confirmation.value?.err === null,
+        error: confirmation.value?.err
+      });
+      
+      // Check if transaction actually succeeded
+      if (confirmation.value?.err) {
+        console.error('❌ Transaction failed with error:', confirmation.value.err);
+        const errorDetails = confirmation.value.err;
+        
+        // Log detailed error information
+        if (errorDetails && typeof errorDetails === 'object' && 'InstructionError' in errorDetails) {
+          const instructionError = (errorDetails as any).InstructionError;
+          console.error('❌ Instruction Error:', instructionError);
+          if (Array.isArray(instructionError) && instructionError.length >= 2) {
+            const [instructionIndex, instructionErrorDetails] = instructionError;
+            console.error(`❌ Failed at instruction ${instructionIndex}:`, instructionErrorDetails);
+          }
+          
+          // Try to get more details from the transaction
+          try {
+            const txDetails = await connection.getTransaction(signature, {
+              commitment: 'confirmed',
+              maxSupportedTransactionVersion: 0
+            });
+            if (txDetails?.meta?.logMessages) {
+              console.error('❌ Transaction logs:', txDetails.meta.logMessages);
+            }
+          } catch (e) {
+            console.error('❌ Could not fetch transaction details:', e);
+          }
+        }
+        
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
+      
+      // Check transaction logs for errors
+      try {
+        const transactionDetails = await connection.getTransaction(signature, {
+          commitment: 'confirmed',
+          maxSupportedTransactionVersion: 0
+        });
+        
+        if (transactionDetails) {
+          console.log('📋 Transaction details:', {
+            slot: transactionDetails.slot,
+            blockTime: transactionDetails.blockTime,
+            meta: transactionDetails.meta ? {
+              err: transactionDetails.meta.err,
+              fee: transactionDetails.meta.fee,
+              preBalances: transactionDetails.meta.preBalances,
+              postBalances: transactionDetails.meta.postBalances,
+              logMessages: transactionDetails.meta.logMessages?.slice(0, 10) // First 10 log messages
+            } : null
+          });
+          
+          // Check for program errors in logs
+          if (transactionDetails.meta?.logMessages) {
+            const errorLogs = transactionDetails.meta.logMessages.filter(log => 
+              log.includes('Error') || log.includes('failed') || log.includes('Program log: Error')
+            );
+            if (errorLogs.length > 0) {
+              console.error('❌ Program errors found in transaction logs:', errorLogs);
+            } else {
+              console.log('✅ No program errors found in transaction logs');
+            }
+          }
+        } else {
+          console.warn('⚠️ Could not fetch transaction details');
+        }
+      } catch (txError) {
+        console.error('❌ Error fetching transaction details:', txError);
+      }
+      
+      // Verify the account was actually created
+      console.log('🔍 Verifying account creation...');
+      try {
+        const accountInfo = await connection.getAccountInfo(launchDataKeypair.publicKey);
+        if (accountInfo) {
+          console.log('✅ Launch data account verified:', {
+            address: launchDataKeypair.publicKey.toBase58(),
+            owner: accountInfo.owner.toBase58(),
+            dataLength: accountInfo.data.length,
+            lamports: accountInfo.lamports,
+            executable: accountInfo.executable,
+            rentEpoch: accountInfo.rentEpoch
+          });
+          
+          // Check if account contains data (not just zeros)
+          const hasData = accountInfo.data.some(byte => byte !== 0);
+          console.log('📊 Account data analysis:', {
+            hasData,
+            firstBytes: Array.from(accountInfo.data.slice(0, 32)).map(b => b.toString(16).padStart(2, '0')).join(' ')
+          });
+        } else {
+          console.error('❌ Launch data account not found after transaction confirmation');
+          
+          // Try to find any accounts that might have been created
+          console.log('🔍 Checking if any of the generated accounts exist...');
+          const accounts = [listingKeypair.publicKey, launchDataKeypair.publicKey, teamWallet];
+          for (const account of accounts) {
+            const info = await connection.getAccountInfo(account);
+            console.log(`📊 Account ${account.toBase58()}:`, info ? 'EXISTS' : 'NOT FOUND');
+          }
+        }
+      } catch (verifyError) {
+        console.error('❌ Error verifying account creation:', verifyError);
+      }
       
       // Now send the token creation fee in a separate transaction
       console.log('💰 Sending token creation fee...');
@@ -536,7 +1061,7 @@ export default function CreateRafflePage() {
               console.log('✅ IPFS image metadata stored:', metadataCid);
               
               // Store the mapping locally for now (in a real app, you'd store this on-chain or in a database)
-              localStorage.setItem(`raffle_metadata_${launchDataKeypair.publicKey.toBase58()}`, metadataCid);
+                  localStorage.setItem(`raffle_metadata_${launchDataKeypair.publicKey.toBase58()}`, metadataCid);
               
               toast({
                 title: "Images Stored!",
@@ -603,6 +1128,10 @@ export default function CreateRafflePage() {
       setCreatedLaunchId(launchDataKeypair.publicKey.toBase58());
       setCreatedTokenMint(baseTokenMintKeypair.publicKey.toBase58());
 
+      // Clear cache so the new raffle appears immediately
+      console.log('🗑️ Clearing cache to refresh raffle list...');
+      blockchainIntegrationService.clearCache();
+
       toast({
         title: "Raffle Created Successfully!",
         description: `Your raffle has been created with fee paid. Launch Data Account: ${launchDataKeypair.publicKey.toBase58().slice(0, 8)}...`,
@@ -610,6 +1139,14 @@ export default function CreateRafflePage() {
 
     } catch (error) {
       console.error('❌ Error creating raffle:', error);
+      console.error('❌ Error details:', {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        walletName: wallet?.adapter?.name,
+        connected,
+        publicKey: publicKey?.toBase58()
+      });
       
       let errorMessage = "An unknown error occurred.";
       let errorTitle = "Raffle Creation Failed";
@@ -623,6 +1160,15 @@ export default function CreateRafflePage() {
         } else if (error.message.includes('User rejected')) {
           errorTitle = "Transaction Cancelled";
           errorMessage = "You cancelled the transaction in your wallet.";
+        } else if (error.message.includes('Unexpected error')) {
+          errorTitle = "Wallet Error";
+          errorMessage = "There was an unexpected error with your wallet. Please try reconnecting or using a different wallet.";
+        } else if (error.message.includes('Transaction serialization failed')) {
+          errorTitle = "Transaction Error";
+          errorMessage = "The transaction could not be properly formatted. Please try again.";
+        } else if (error.message.includes('Transaction expired')) {
+          errorTitle = "Transaction Expired";
+          errorMessage = "The transaction took too long to process. Please try again.";
         }
       }
       
@@ -660,7 +1206,8 @@ export default function CreateRafflePage() {
       teamAllocation: 20,
       marketingAllocation: 15,
       liquidityAllocation: 10,
-      treasuryAllocation: 5
+      treasuryAllocation: 5,
+      type: 'raffle'
     });
     setTxSignature(null);
     setErrors({});

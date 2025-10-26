@@ -12,31 +12,42 @@ use crate::{
     utils::{self, calculate_rent, create_2022_token},
 };
 pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], args: CreateArgs) -> ProgramResult {
-    msg!("in create game, getting accounts");
-
+    msg!("🚀 Starting create_launch instruction");
+    msg!("📊 Args: name={}, symbol={}, launch_type={}", args.name, args.symbol, args.launch_type);
+    msg!("💰 Ticket price: {} lamports, {} SOL", args.ticket_price, utils::to_sol(args.ticket_price));
+    
+    msg!("📋 Creating account context");
     let ctx: crate::instruction::accounts::Context<CreateLaunchAccounts> = CreateLaunchAccounts::context(accounts)?;
+    msg!("✅ Account context created successfully");
 
-    msg!("verify accounts");
+    msg!("🔍 Verifying accounts");
 
     if !ctx.accounts.user.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
 
+    msg!("🔍 Validating listing PDA");
     let listing_bump_seed = accounts::check_program_data_account(
         ctx.accounts.listing,
         program_id,
         vec![&ctx.accounts.base_token_mint.key.to_bytes(), b"Listing"],
-    )
-    .unwrap();
+    )?;
+    msg!("✅ Listing PDA validated");
 
+    msg!("🔍 Validating launch_data PDA");
     let launch_bump_seed =
-        accounts::check_program_data_account(ctx.accounts.launch_data, program_id, vec![args.page_name.as_bytes(), b"Launch"]).unwrap();
+        accounts::check_program_data_account(ctx.accounts.launch_data, program_id, vec![args.page_name.as_bytes(), b"Launch"])?;
+    msg!("✅ Launch_data PDA validated");
 
     accounts::check_wrapped_sol_key(ctx.accounts.quote_token_mint)?;
 
-    let _pda_bump_seed = accounts::check_program_data_account(ctx.accounts.cook_data, program_id, vec![&accounts::DATA_SEED.to_le_bytes()]).unwrap();
+    msg!("🔍 Validating cook_data PDA");
+    let _pda_bump_seed = accounts::check_program_data_account(ctx.accounts.cook_data, program_id, vec![&accounts::DATA_SEED.to_le_bytes()])?;
+    msg!("✅ Cook_data PDA validated");
 
-    let pda_sol_bump_seed = accounts::check_program_data_account(ctx.accounts.cook_pda, program_id, vec![&accounts::SOL_SEED.to_le_bytes()]).unwrap();
+    msg!("🔍 Validating cook_pda PDA");
+    let pda_sol_bump_seed = accounts::check_program_data_account(ctx.accounts.cook_pda, program_id, vec![&accounts::SOL_SEED.to_le_bytes()])?;
+    msg!("✅ Cook_pda PDA validated");
 
     accounts::check_token_account(
         ctx.accounts.cook_pda,
@@ -82,15 +93,19 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
         return Err(ProgramError::InvalidAccountData);
     }
 
+    msg!("🔍 Validating ticket price: {} lamports = {} SOL", args.ticket_price, utils::to_sol(args.ticket_price));
     if utils::to_sol(args.ticket_price) < 0.0001 {
-        msg!("ticket price must be greater than 0.0001 SOL");
+        msg!("❌ ticket price must be greater than 0.0001 SOL");
         return Err(ProgramError::InvalidAccountData);
     }
+    msg!("✅ Ticket price validation passed");
 
+    msg!("🔍 Validating total supply: {}", args.total_supply);
     if args.total_supply < 10 {
-        msg!("Total supply must be greater than 10");
+        msg!("❌ Total supply must be greater than 10");
         return Err(ProgramError::InvalidAccountData);
     }
+    msg!("✅ Total supply validation passed");
 
     // create the wrapped sol account
 
@@ -224,15 +239,27 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
 
     launch_data.distribution = vec![0; Distribution::LENGTH as usize];
 
+    msg!("🔧 Setting up launch keys and flags");
     launch_data.keys = vec![Pubkey::default(); LaunchKeys::LENGTH as usize];
+    msg!("✅ Keys vector created with length: {}", launch_data.keys.len());
+    
     launch_data.keys[LaunchKeys::Seller as usize] = *ctx.accounts.user.key;
+    msg!("✅ Seller key set");
+    
     launch_data.keys[LaunchKeys::TeamWallet as usize] = *ctx.accounts.team.key;
+    msg!("✅ Team wallet key set");
+    
     launch_data.keys[LaunchKeys::WSOLAddress as usize] = *ctx.accounts.launch_quote.key;
+    msg!("✅ WSOL address key set");
 
     launch_data.flags = vec![0; LaunchFlags::LENGTH as usize];
+    msg!("✅ Flags vector created with length: {}", launch_data.flags.len());
 
     launch_data.flags[LaunchFlags::Extensions as usize] = args.extensions;
+    msg!("✅ Extensions flag set");
+    
     launch_data.flags[LaunchFlags::AMMProvider as usize] = args.amm_provider;
+    msg!("✅ AMM provider flag set");
 
     let listing_len = to_vec(&listing).unwrap().len();
 

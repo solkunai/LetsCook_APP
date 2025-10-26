@@ -91,11 +91,24 @@ export class SPLTokenMetadataService {
             name: 'Unknown Token',
             symbol: 'UNK',
             uri: 'https://example.com/metadata.json',
-            decimals: mintAccount.decimals
+            decimals: mintAccount?.decimals || 9
           };
         } catch (error) {
           console.error('❌ Error parsing metadata:', error);
-          return { hasMetadata: false };
+          // Still try to return basic info if we can
+          try {
+            const mintAccount = await getMint(connection, tokenMint, 'confirmed', TOKEN_2022_PROGRAM_ID);
+            return {
+              hasMetadata: true,
+              name: 'Unknown Token',
+              symbol: 'UNK',
+              uri: 'https://example.com/metadata.json',
+              decimals: mintAccount.decimals
+            };
+          } catch (fallbackError) {
+            console.error('❌ Error in fallback:', fallbackError);
+            return { hasMetadata: false };
+          }
         }
       }
       
@@ -124,7 +137,16 @@ export class SPLTokenMetadataService {
     try {
       const metadata = await this.verifyTokenMetadata(connection, tokenMint);
       
+      console.log('📊 verifyTokenMetadata returned:', {
+        hasMetadata: metadata.hasMetadata,
+        name: metadata.name,
+        symbol: metadata.symbol,
+        decimals: metadata.decimals,
+        uri: metadata.uri
+      });
+      
       if (!metadata.hasMetadata) {
+        console.log('❌ No metadata found, returning null');
         return null;
       }
       
@@ -134,9 +156,11 @@ export class SPLTokenMetadataService {
       
       if (metadata.uri) {
         try {
+          console.log('🔍 Fetching metadata from URI:', metadata.uri);
           const response = await fetch(metadata.uri);
           if (response.ok) {
             const metadataJson = await response.json();
+            console.log('✅ Metadata JSON fetched:', metadataJson);
             imageUrl = metadataJson.image;
             description = metadataJson.description;
           }
@@ -145,7 +169,7 @@ export class SPLTokenMetadataService {
         }
       }
       
-      return {
+      const result = {
         name: metadata.name || 'Unknown Token',
         symbol: metadata.symbol || 'UNK',
         image: imageUrl,
@@ -153,6 +177,9 @@ export class SPLTokenMetadataService {
         decimals: metadata.decimals || 9,
         supply: undefined // Would need to parse from mint account
       };
+      
+      console.log('📤 Returning display info:', result);
+      return result;
       
     } catch (error) {
       console.error('❌ Error getting token display info:', error);

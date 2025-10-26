@@ -11,7 +11,7 @@ use solana_program::{
     rent::Rent,
     sysvar::Sysvar,
     system_program,
-    program::invoke_signed,
+    program::{invoke, invoke_signed},
     system_instruction,
     instruction::{AccountMeta, Instruction},
 };
@@ -311,6 +311,7 @@ impl Processor {
 
         let user = &accounts[0]; // user account
         let launch_data = &accounts[2]; // launchData account
+        let base_token_mint = &accounts[7]; // baseTokenMint account
         
         // Create launch data structure
         let launch_data_struct = crate::state::LaunchData {
@@ -354,12 +355,16 @@ impl Processor {
                     _ => "raffle".to_string(),
                 },
             ],
-            keys: vec![],
+            keys: vec![
+                base_token_mint.key.to_string(), // Store baseTokenMint in keys array
+            ],
             creator: *user.key,
             upvotes: 0,
             downvotes: 0,
             is_tradable: false, // Raffle launches start non-tradable
         };
+        
+        msg!("✅ Stored baseTokenMint in keys array: {}", base_token_mint.key.to_string());
 
         // Serialize and write to account
         let serialized_data = borsh::to_vec(&launch_data_struct)?;
@@ -1304,10 +1309,8 @@ impl Processor {
         } else if args.side == 1 {
             msg!("💸 Processing token sale");
             
-            let token_amount = args.max_base_quantity;
+            let token_amount = args.max_base_quantity; // All tokens to burn
             let fee_rate = 25; // 0.25% fee (25 basis points)
-            let fee_amount = (token_amount * fee_rate) / 10000;
-            let net_token_amount = token_amount - fee_amount;
             
             // Get current SOL in AMM pool
             let current_amm_sol = **amm_account.lamports.borrow();
@@ -1316,7 +1319,7 @@ impl Processor {
             
             // Gentler inverse bonding curve for selling
             let pool_sol_f64 = current_amm_sol as f64;
-            let tokens_in_f64 = net_token_amount as f64;
+            let tokens_in_f64 = token_amount as f64; // Calculate SOL from ALL tokens
             
             // Use same curve as buying (inverse)
             let base_rate = 1000.0; // 1000 tokens = 1 SOL
@@ -1332,37 +1335,34 @@ impl Processor {
                 1.0 // Full rate for early sells
             };
             
-            // Calculate SOL: (tokens / 1e9) / 1000 * 1e9 * multiplier
-            let sol_to_return = ((tokens_in_f64 / 1_000_000_000.0) / base_rate * 1_000_000_000.0 * price_multiplier) as u64;
+            // Calculate total SOL from ALL tokens: (tokens / 1e9) / 1000 * 1e9 * multiplier
+            let total_sol = ((tokens_in_f64 / 1_000_000_000.0) / base_rate * 1_000_000_000.0 * price_multiplier) as u64;
+            
+            // Deduct 0.25% fee from SOL (like we do on buy side)
+            let sol_fee = (total_sol * fee_rate) / 10000;
+            let sol_to_user = total_sol - sol_fee;
             
             // SLIPPAGE PROTECTION: Verify against minimum expected
             let minimum_expected_sol = args.max_quote_quantity; // Frontend sets minimum SOL expected
-            if sol_to_return < minimum_expected_sol {
-                msg!("❌ Slippage too high! Expected: {} lamports, Got: {} lamports", minimum_expected_sol, sol_to_return);
+            if sol_to_user < minimum_expected_sol {
+                msg!("❌ Slippage too high! Expected: {} lamports, Got: {} lamports", minimum_expected_sol, sol_to_user);
                 return Err(ProgramError::Custom(1)); // Slippage exceeded
             }
             
             // Verify AMM has enough SOL to return
-            if current_amm_sol < sol_to_return {
-                msg!("❌ Insufficient liquidity! Pool has: {} lamports, Need: {} lamports", current_amm_sol, sol_to_return);
+            if current_amm_sol < total_sol {
+                msg!("❌ Insufficient liquidity! Pool has: {} lamports, Need: {} lamports", current_amm_sol, total_sol);
                 return Err(ProgramError::InsufficientFunds);
             }
             
             msg!("💸 Bonding curve sell:");
-            msg!("  Tokens in: {} ({} tokens)", net_token_amount, net_token_amount / 1_000_000_000);
+            msg!("  Tokens in: {} ({} tokens)", token_amount, token_amount / 1_000_000_000);
             msg!("  Pool before: {} lamports ({} SOL)", current_amm_sol, current_amm_sol / 1_000_000_000);
             msg!("  Price multiplier: {:.6}", price_multiplier);
-            msg!("  SOL out: {} lamports ({} SOL)", sol_to_return, sol_to_return / 1_000_000_000);
-            msg!("  Effective rate: {:.2} SOL per 1000 tokens", (sol_to_return as f64 / tokens_in_f64) * 1000.0 * 1_000_000_000.0);
-            
-            let burn_instruction = token_instruction::burn(
-                &spl_token::ID,
-                user_token_account.key,
-                token_mint.key,
-                user.key,
-                &[],
-                net_token_amount,
-            )?;
+            msg!("  Total SOL value: {} lamports ({} SOL)", total_sol, total_sol / 1_000_000_000);
+            msg!("  SOL fee (0.25%): {} lamports", sol_fee);
+            msg!("  SOL to user: {} lamports ({} SOL)", sol_to_user, sol_to_user / 1_000_000_000);
+            msg!("  Effective rate: {:.2} SOL per 1000 tokens", (total_sol as f64 / tokens_in_f64) * 1000.0 * 1_000_000_000.0);
             
             // Get token program from accounts (should be at index 7)
             let token_program = if accounts.len() > 7 {
@@ -1372,51 +1372,55 @@ impl Processor {
                 return Err(ProgramError::NotEnoughAccountKeys);
             };
             
-            invoke_signed(
+            // Burn ALL tokens (use TOKEN_2022_PROGRAM_ID for Token 2022 tokens)
+            let burn_instruction = token_instruction::burn(
+                &TOKEN_2022_PROGRAM_ID,
+                user_token_account.key,
+                token_mint.key,
+                user.key,
+                &[],
+                token_amount, // Burn ALL tokens
+            )?;
+            
+            // Burn requires: token_account, mint, authority, token_program
+            // Use regular invoke (not invoke_signed) because the user is the signer, not a PDA
+            invoke(
                 &burn_instruction,
                 &[
                     user_token_account.clone(),
                     token_mint.clone(),
-                    token_program.clone(),  // REQUIRED for burn CPI
+                    user.clone(),  // authority (owner of the token account)
+                    token_program.clone(),
                 ],
-                &[],
             )?;
             
-            let transfer_instruction = system_instruction::transfer(
-                amm_account.key,
-                user_sol_account.key,
-                sol_to_return,
-            );
+            // Transfer net SOL from AMM to user (total_sol - fee)
+            // Note: Cannot use system_instruction::transfer because AMM account has data
+            let amm_lamports_before = **amm_account.try_borrow_lamports()?;
+            let user_lamports_before = **user_sol_account.try_borrow_lamports()?;
             
-            invoke_signed(
-                &transfer_instruction,
-                &[
-                    amm_account.clone(),
-                    user_sol_account.clone(),
-                    accounts[6].clone(),
-                ],
-                &[],
-            )?;
+            **amm_account.try_borrow_mut_lamports()? = amm_lamports_before
+                .checked_sub(sol_to_user)
+                .ok_or(ProgramError::InsufficientFunds)?;
+            **user_sol_account.try_borrow_mut_lamports()? = user_lamports_before
+                .checked_add(sol_to_user)
+                .ok_or(ProgramError::InvalidArgument)?;
             
-            if fee_amount > 0 {
-                let fee_burn_instruction = token_instruction::burn(
-                    &spl_token::ID,
-                    user_token_account.key,
-                    token_mint.key,
-                    user.key,
-                    &[],
-                    fee_amount,
-                )?;
+            msg!("✅ Transferred {} lamports to user", sol_to_user);
+            
+            // Transfer fee to ledger_wallet (if fee > 0)
+            if sol_fee > 0 {
+                let amm_lamports_after_user = **amm_account.try_borrow_lamports()?;
+                let ledger_lamports_before = **ledger_wallet.try_borrow_lamports()?;
                 
-                invoke_signed(
-                    &fee_burn_instruction,
-                    &[
-                        user_token_account.clone(),
-                        token_mint.clone(),
-                        token_program.clone(),  // REQUIRED for burn CPI
-                    ],
-                    &[],
-                )?;
+                **amm_account.try_borrow_mut_lamports()? = amm_lamports_after_user
+                    .checked_sub(sol_fee)
+                    .ok_or(ProgramError::InsufficientFunds)?;
+                **ledger_wallet.try_borrow_mut_lamports()? = ledger_lamports_before
+                    .checked_add(sol_fee)
+                    .ok_or(ProgramError::InvalidArgument)?;
+                
+                msg!("✅ Transferred {} lamports fee to ledger wallet", sol_fee);
             }
             
             msg!("✅ Token sale completed successfully");

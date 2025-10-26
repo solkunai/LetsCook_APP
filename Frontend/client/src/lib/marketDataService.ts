@@ -22,6 +22,10 @@ export interface PriceHistory {
 class MarketDataService {
   private connection: Connection;
   private instantMarketDataService: InstantLaunchMarketDataService;
+  
+  // Simple rate limiting
+  private lastRequestTime = 0;
+  private readonly MIN_REQUEST_INTERVAL = 500; // 500ms between requests
   private cache: Map<string, { data: MarketData; timestamp: number }> = new Map();
   private priceHistoryCache: Map<string, PriceHistory[]> = new Map();
   private readonly CACHE_DURATION = 30000; // 30 seconds
@@ -29,6 +33,21 @@ class MarketDataService {
   constructor(connection: Connection) {
     this.connection = connection;
     this.instantMarketDataService = new InstantLaunchMarketDataService(connection);
+  }
+
+  /**
+   * Simple rate limiting to prevent 429 errors
+   */
+  private async rateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    
+    if (timeSinceLastRequest < this.MIN_REQUEST_INTERVAL) {
+      const delay = this.MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    this.lastRequestTime = Date.now();
   }
 
   // Get real-time market data for a token
@@ -42,12 +61,12 @@ class MarketDataService {
     }
 
     try {
-      console.log('📊 Fetching real blockchain market data for token:', tokenMint);
+      // Fetching market data - no logging
       
       // Check if this is an instant launch token
       const launchData = await this.findLaunchByTokenMint(tokenMint);
       if (launchData && launchData.launchType === 'instant') {
-        console.log('🚀 Detected instant launch, using InstantLaunchMarketDataService');
+        // Using instant launch service - no logging
         const instantMarketData = await this.instantMarketDataService.getMarketData(
           launchData.launchDataAccount,
           tokenMint
@@ -71,7 +90,7 @@ class MarketDataService {
           timestamp: Date.now()
         });
         
-        console.log('✅ Instant launch market data fetched:', marketData);
+        // Market data fetched - no logging
         return marketData;
       }
       
@@ -91,11 +110,10 @@ class MarketDataService {
       // Get real price from Jupiter API as backup
       const jupiterPrice = await this.getJupiterPrice(tokenMint);
       
-      // Use Jupiter price if AMM price seems off
       const currentPrice = jupiterPrice && jupiterPrice > 0 ? jupiterPrice : ammData.price;
       
-      // Calculate real market data
-      const marketCap = currentPrice * (totalSupply || 1000000); // Use actual total supply or default to 1M
+      const circulatingSupply = ammData.tokenReserves;
+      const marketCap = currentPrice * circulatingSupply;
       const liquidity = ammData.solReserves;
       
       // Calculate price changes (we'll need historical data for this)
@@ -121,12 +139,12 @@ class MarketDataService {
         timestamp: Date.now()
       });
       
-      console.log('✅ Real market data fetched:', marketData);
+      // Real market data fetched - no logging
       return marketData;
     } catch (error) {
       console.error('Error fetching real market data:', error);
       // Fallback to simulated data if blockchain data fails
-      console.log('🔄 Falling back to simulated data');
+      // Falling back to simulated data - no logging
       return await this.simulateMarketData(tokenMint);
     }
   }
@@ -163,7 +181,7 @@ class MarketDataService {
     }
 
     try {
-      console.log('📈 Fetching real price history for token:', tokenMint, 'timeframe:', timeframe);
+      // Fetching price history - no logging
       
       // Get real price history from blockchain transactions
       const priceHistory = await this.getRealPriceHistory(tokenMint, timeframe);
@@ -175,7 +193,7 @@ class MarketDataService {
     } catch (error) {
       console.error('Error fetching real price history:', error);
       // Fallback to generated data
-      console.log('🔄 Falling back to generated price history');
+      // Falling back to generated price history - no logging
       const priceHistory = this.generatePriceHistory(timeframe);
       this.priceHistoryCache.set(cacheKey, priceHistory);
       return priceHistory;
@@ -197,7 +215,7 @@ class MarketDataService {
       const currentAmmData = await this.getAMMAccountData(tokenMint);
       if (!currentAmmData || currentAmmData.solReserves === 0) {
         // AMM not initialized yet, return flat price history
-        console.log('AMM not initialized, returning flat price history');
+        // AMM not initialized - no logging
         return this.generatePriceHistory(timeframe);
       }
       
@@ -361,7 +379,7 @@ class MarketDataService {
 
   // Fallback market data when blockchain data is unavailable
   private async simulateMarketData(tokenMint: string): Promise<MarketData> {
-    console.log('⚠️ Using fallback market data for token:', tokenMint);
+      // Using fallback market data - no logging
     
     // Return minimal fallback data
     return {
@@ -379,7 +397,7 @@ class MarketDataService {
 
   // Generate minimal fallback price history
   private generatePriceHistory(timeframe: '1h' | '24h' | '7d'): PriceHistory[] {
-    console.log('⚠️ Using fallback price history for timeframe:', timeframe);
+      // Using fallback price history - no logging
     
     const now = Date.now();
     const intervals = {
@@ -417,40 +435,29 @@ class MarketDataService {
     try {
       const tokenMintKey = new PublicKey(tokenMint);
       
-      // Derive AMM account PDA
       const [ammAccount] = PublicKey.findProgramAddressSync(
         [Buffer.from('amm'), tokenMintKey.toBuffer()],
-        new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ') // PROGRAM_ID
+        new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ')
       );
       
-      // Get account info
       const accountInfo = await this.connection.getAccountInfo(ammAccount);
-      
-      if (!accountInfo || accountInfo.data.length < 88) {
-        console.log('AMM account not found or not initialized');
-        // Return default AMM data for tokens without initialized AMM
-        return {
-          price: 0.00003, // Default starting price
-          solReserves: 0,
-          tokenReserves: 0
-        };
+      if (!accountInfo || accountInfo.data.length === 0) {
+        return null;
       }
       
-      // Parse AMM data (assuming 88 bytes: 8 discriminator + 32 token_mint + 32 user + 8 sol_reserves + 8 token_reserves)
-      const data = accountInfo.data;
-      const solReserves = Number(data.readBigUInt64LE(72));
-      const tokenReserves = Number(data.readBigUInt64LE(80));
+      const solReserves = accountInfo.lamports / 1e9;
       
-      // Calculate price using constant product formula
-      const price = solReserves / tokenReserves;
+      const BONDING_CURVE_BASE_RATE = 1000.0;
+      const price = (1 / BONDING_CURVE_BASE_RATE);
+      
+      const tokenReserves = solReserves * BONDING_CURVE_BASE_RATE;
       
       return {
-        solReserves: solReserves / 1e9, // Convert lamports to SOL
+        solReserves,
         tokenReserves,
         price
       };
     } catch (error) {
-      console.error('Error fetching AMM account data:', error);
       return null;
     }
   }
@@ -459,20 +466,44 @@ class MarketDataService {
   async getTokenHolderCount(tokenMint: string): Promise<number> {
     try {
       const tokenMintKey = new PublicKey(tokenMint);
+      const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
       
-      // Get all token accounts for this mint
-      const tokenAccounts = await this.connection.getTokenAccountsByMint(tokenMintKey);
+      let holders = 0;
       
-      // Filter out accounts with zero balance
-      const holdersWithBalance = tokenAccounts.value.filter(account => {
-        const data = account.account.data;
-        const amount = data.readBigUInt64LE(64); // Amount is at offset 64
-        return amount > 0;
-      });
+      try {
+        const splAccounts = await this.connection.getProgramAccounts(
+          new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+          {
+            filters: [
+              { dataSize: 165 },
+              { memcmp: { offset: 0, bytes: tokenMintKey.toBase58() } }
+            ]
+          }
+        );
+        holders += splAccounts.filter(acc => {
+          const amount = acc.account.data.readBigUInt64LE(64);
+          return amount > BigInt(0);
+        }).length;
+      } catch {}
       
-      return holdersWithBalance.length;
+      try {
+        const token2022Accounts = await this.connection.getProgramAccounts(
+          TOKEN_2022_PROGRAM_ID,
+          {
+            filters: [
+              { memcmp: { offset: 0, bytes: tokenMintKey.toBase58() } }
+            ]
+          }
+        );
+        holders += token2022Accounts.filter(acc => {
+          if (acc.account.data.length < 72) return false;
+          const amount = acc.account.data.readBigUInt64LE(64);
+          return amount > BigInt(0);
+        }).length;
+      } catch {}
+      
+      return holders;
     } catch (error) {
-      console.error('Error fetching token holder count:', error);
       return 0;
     }
   }
@@ -587,7 +618,7 @@ class MarketDataService {
   // Get Jupiter API price for token
   async getJupiterPrice(tokenMint: string): Promise<number | null> {
     try {
-      console.log('🔍 Fetching Jupiter price for token:', tokenMint);
+      // Fetching Jupiter price - no logging
       
       // Jupiter API endpoint for price
       const response = await fetch(`https://price.jup.ag/v4/price?ids=${tokenMint}`);
@@ -600,7 +631,7 @@ class MarketDataService {
       
       if (data.data && data.data[tokenMint]) {
         const price = data.data[tokenMint].price;
-        console.log('✅ Jupiter price fetched:', price);
+        // Jupiter price fetched - no logging
         return price;
       }
       

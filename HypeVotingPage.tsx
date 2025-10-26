@@ -38,42 +38,8 @@ interface LaunchVote {
   status: 'upcoming' | 'live' | 'ended';
 }
 
-const mockLaunches: LaunchVote[] = [
-  {
-    id: 'launch_1',
-    name: 'ChefCoin',
-    symbol: 'CHEF',
-    description: 'The ultimate meme coin for cooking enthusiasts. Join the culinary revolution!',
-    image: '/api/placeholder/300/200',
-    creator: 'ChefMaster',
-    launchDate: new Date('2024-02-15'),
-    hypeScore: 85,
-    totalVotes: 1247,
-    upvotes: 1089,
-    downvotes: 158,
-    userVote: 'up',
-    category: 'meme',
-    tags: ['cooking', 'meme', 'community'],
-    status: 'live'
-  },
-  {
-    id: 'launch_2',
-    name: 'GameFi Protocol',
-    symbol: 'GAME',
-    description: 'Revolutionary gaming protocol with play-to-earn mechanics and NFT integration.',
-    image: '/api/placeholder/300/200',
-    creator: 'GameDevPro',
-    launchDate: new Date('2024-02-20'),
-    hypeScore: 92,
-    totalVotes: 2156,
-    upvotes: 1987,
-    downvotes: 169,
-    userVote: null,
-    category: 'gaming',
-    tags: ['gaming', 'defi', 'nft', 'p2e'],
-    status: 'upcoming'
-  }
-];
+// Mock data removed - only use real blockchain data
+const mockLaunches: LaunchVote[] = [];
 
 const categoryColors = {
   meme: 'bg-pink-100 text-pink-800',

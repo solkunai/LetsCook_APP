@@ -40,9 +40,7 @@ import {
 import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { launchService } from '@/lib/launchService';
-import { enhancedLaunchService } from '@/lib/enhancedLaunchService';
 import type { LaunchData } from '@/lib/launchDataService';
-import type { EnhancedLaunchData } from '@/lib/enhancedLaunchService';
 import BuyTicketsModal from '@/components/BuyTicketsModal';
 import { useLocation } from 'wouter';
 import { toast } from '@/hooks/use-toast';
@@ -52,8 +50,8 @@ import { Connection, PublicKey } from '@solana/web3.js';
 export default function HomePage() {
   const { connected, publicKey, sendTransaction } = useWallet();
   const [, setLocation] = useLocation();
-  const [launches, setLaunches] = useState<EnhancedLaunchData[]>([]);
-  const [filteredLaunches, setFilteredLaunches] = useState<EnhancedLaunchData[]>([]);
+  const [launches, setLaunches] = useState<LaunchData[]>([]);
+  const [filteredLaunches, setFilteredLaunches] = useState<LaunchData[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLaunch, setSelectedLaunch] = useState<any>(null);
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
@@ -117,9 +115,13 @@ export default function HomePage() {
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'newest':
-          return b.launchDate.getTime() - a.launchDate.getTime();
+          const bTime = a.launchDate instanceof Date ? a.launchDate.getTime() : new Date(a.launchDate).getTime();
+          const aTime = b.launchDate instanceof Date ? b.launchDate.getTime() : new Date(b.launchDate).getTime();
+          return aTime - bTime;
         case 'oldest':
-          return a.launchDate.getTime() - b.launchDate.getTime();
+          const aTimeOld = a.launchDate instanceof Date ? a.launchDate.getTime() : new Date(a.launchDate).getTime();
+          const bTimeOld = b.launchDate instanceof Date ? b.launchDate.getTime() : new Date(b.launchDate).getTime();
+          return aTimeOld - bTimeOld;
         case 'price':
           return b.currentPrice - a.currentPrice;
         case 'volume':
@@ -164,27 +166,9 @@ export default function HomePage() {
   const fetchLaunches = async () => {
     try {
       setLoading(true);
-      console.log('🔍 HomePage: Fetching enhanced launches from blockchain...');
-      
-      // Fetch launches using the enhanced service that handles different types
-      const fetchedLaunches = await enhancedLaunchService.fetchAllLaunchesEnhanced();
-      console.log('✅ HomePage: Fetched enhanced launches:', fetchedLaunches.length);
-      
-      // Debug: Log each launch's details with type information
-      console.log('📊 HomePage Enhanced Launch data:');
-      fetchedLaunches.forEach((launch, index) => {
-        console.log(`Launch ${index + 1}: ${launch.name}`);
-        console.log(`  - Type: ${launch.launchType} (Instant: ${launch.isInstantLaunch}, Raffle: ${launch.isRaffleLaunch}, IDO: ${launch.isIDOLaunch})`);
-        console.log(`  - Image URL: "${launch.image}"`);
-        console.log(`  - Status: ${launch.status}`);
-        console.log(`  - ID: ${launch.id}`);
-        console.log(`  - Liquidity Pool: ${launch.liquidityPoolStatus}`);
-        console.log(`  - Trading Volume: ${launch.tradingVolume}`);
-      });
-      
+      const fetchedLaunches = await launchService.fetchAllLaunches();
       setLaunches(fetchedLaunches);
     } catch (error) {
-      console.error('❌ HomePage: Error fetching enhanced launches:', error);
       setLaunches([]);
       toast({
         title: "Error",
@@ -913,17 +897,18 @@ function LaunchCard({
   isUpcoming = false, 
   onBuyTickets 
 }: { 
-  launch: EnhancedLaunchData; 
+  launch: LaunchData; 
   isUpcoming?: boolean;
-  onBuyTickets?: (launch: EnhancedLaunchData) => void;
+  onBuyTickets?: (launch: LaunchData) => void;
 }) {
   const [, setLocation] = useLocation();
   const [imageError, setImageError] = useState(false);
   const [currentImageSrc, setCurrentImageSrc] = useState(launch.image);
 
-  const formatTimeAgo = (date: Date): string => {
+  const formatTimeAgo = (date: Date | number): string => {
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    const dateObj = date instanceof Date ? date : new Date(date);
+    const diffInMinutes = Math.floor((now.getTime() - dateObj.getTime()) / (1000 * 60));
     
     if (diffInMinutes < 1) return 'Just now';
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
@@ -1044,20 +1029,6 @@ function LaunchCard({
                  '📈 Launch'}
               </Badge>
               
-              {/* Liquidity Pool Status */}
-              {launch.liquidityPoolStatus && (
-                <Badge variant="outline" className={`${
-                  launch.liquidityPoolStatus === 'active' 
-                    ? 'border-green-500/30 text-green-400' 
-                    : launch.liquidityPoolStatus === 'pending'
-                    ? 'border-yellow-500/30 text-yellow-400'
-                    : 'border-red-500/30 text-red-400'
-                }`}>
-                  {launch.liquidityPoolStatus === 'active' ? '💧 Active' :
-                   launch.liquidityPoolStatus === 'pending' ? '⏳ Pending' :
-                   '❌ Inactive'}
-                </Badge>
-              )}
               
               {/* Status Badge */}
               <Badge variant="outline" className={`${
@@ -1092,7 +1063,7 @@ function LaunchCard({
         <div className="text-center">
           <div className="text-gray-400 text-xs">24h Volume</div>
           <div className="text-white font-semibold text-sm">
-            ${formatMarketCap(launch.tradingVolume || launch.volume24h || 0)}
+            ${formatMarketCap(launch.volume24h || 0)}
           </div>
         </div>
         <div className="text-center">
@@ -1124,8 +1095,8 @@ function LaunchCard({
               <VotingComponent
                 launchId={launch.id}
                 currentVotes={{
-                  upvotes: Math.floor(Math.random() * 50) + 10, // Mock data
-                  downvotes: Math.floor(Math.random() * 10) + 1
+                  upvotes: launch.hypeScore || 0,
+                  downvotes: Math.max(0, (launch.participants || 0) - (launch.hypeScore || 0))
                 }}
                 size="sm"
                 onVote={(vote) => {

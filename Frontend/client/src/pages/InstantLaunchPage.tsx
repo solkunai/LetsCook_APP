@@ -93,7 +93,7 @@ export default function InstantLaunchPage() {
         symbol: formData.symbol,
         uri: formData.uri,
         icon: formData.icon,
-        banner: '/api/placeholder/800/200?text=Banner',
+        banner: formData.banner || null,
         description: formData.description,
         website: formData.website,
         twitter: formData.twitter,
