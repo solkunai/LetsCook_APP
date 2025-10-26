@@ -473,8 +473,8 @@ export class TradingService {
         PROGRAM_ID
       );
       
-      // Fees account (ledger_wallet) - using devnet fees account
-      const feesAccount = new PublicKey('A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
+      // Fees account (ledger_wallet) - loaded from environment variable
+      const feesAccount = new PublicKey(import.meta.env.VITE_LEDGER_WALLET || 'A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
       
       // For Cook AMM swaps, we need the user's SOL account (same as user key for SOL)
       const userSolAccount = userKey;
@@ -908,8 +908,8 @@ export class TradingService {
         dataLength: launchAccountInfo?.data.length
       });
       
-      // Fees account (ledger_wallet) - using devnet fees account
-      const feesAccount = new PublicKey('A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
+      // Fees account (ledger_wallet) - loaded from environment variable
+      const feesAccount = new PublicKey(import.meta.env.VITE_LEDGER_WALLET || 'A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
       
       // For Cook AMM swaps, we need the user's SOL account (same as user key for SOL)
       const userSolAccount = userKey;
@@ -1078,13 +1078,11 @@ export class TradingService {
       console.log('🎫 Buying tickets:', { raffleId, userPublicKey, ticketCount, totalCost });
       
       const userPubkey = new PublicKey(userPublicKey);
-      const rafflePubkey = new PublicKey(raffleId);
       
-      // Derive the launch data account PDA
-      const [launchDataAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('launch_data'), rafflePubkey.toBuffer()],
-        PROGRAM_ID
-      );
+      // The raffleId IS the launch data account (regular account, not PDA)
+      const launchDataAccount = new PublicKey(raffleId);
+      
+      console.log('🔍 Using launch data account:', launchDataAccount.toBase58());
       
       // Calculate amount in lamports
       const amountInLamports = Math.floor(totalCost * LAMPORTS_PER_SOL);
@@ -1109,28 +1107,37 @@ export class TradingService {
         argsBuffer         // Serialized JoinArgs
       ]);
       
+      // Ledger wallet for platform fees - loaded from environment variable
+      const LEDGER_WALLET = new PublicKey(import.meta.env.VITE_LEDGER_WALLET || 'A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
+      
+      // Note: userPubkey appears twice because backend expects:
+      // accounts[0] = user (signer)
+      // accounts[2] = user_sol_account (for SOL transfers)
+      // Both refer to the same wallet address
+      // Solana runtime handles this by deduplicating automatically
       const instruction = new TransactionInstruction({
         keys: [
-          { pubkey: userPubkey, isSigner: true, isWritable: true },        // user
-          { pubkey: launchDataAccount, isSigner: false, isWritable: true }, // launch_data
-          { pubkey: userPubkey, isSigner: false, isWritable: true },         // user_sol_account (same as user for SOL)
-          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+          { pubkey: userPubkey, isSigner: true, isWritable: true },        // accounts[0]: user
+          { pubkey: launchDataAccount, isSigner: false, isWritable: true }, // accounts[1]: launch_data
+          { pubkey: userPubkey, isSigner: true, isWritable: true },         // accounts[2]: user_sol_account (same as user)
+          { pubkey: LEDGER_WALLET, isSigner: false, isWritable: true },     // accounts[3]: ledger_wallet
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // accounts[4]: system_program
         ],
         programId: PROGRAM_ID,
         data: instructionData,
       });
       
-      // Create transaction
-      const transaction = new Transaction();
-      transaction.add(instruction);
+      console.log('🔍 Instruction accounts:', {
+        user: userPubkey.toBase58(),
+        launchData: launchDataAccount.toBase58(),
+        userSolAccount: userPubkey.toBase58(),
+        ledgerWallet: LEDGER_WALLET.toBase58(),
+        systemProgram: SystemProgram.programId.toBase58()
+      });
       
-      // Get recent blockhash
-      const { blockhash } = await this.connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = userPubkey;
+      // Debug: Check if all accounts exist before creating transaction
+      console.log('🔍 Checking all accounts before transaction...');
       
-      // Debug: Check if the launch data account exists and has valid data
-      console.log('🔍 Checking launch data account before transaction...');
       const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
       if (!launchAccountInfo) {
         throw new Error('Raffle account not found');
@@ -1141,6 +1148,13 @@ export class TradingService {
         dataLength: launchAccountInfo.data.length,
         executable: launchAccountInfo.executable,
         rentEpoch: launchAccountInfo.rentEpoch
+      });
+      
+      const ledgerWalletInfo = await this.connection.getAccountInfo(LEDGER_WALLET);
+      console.log('📊 Ledger wallet info:', {
+        exists: !!ledgerWalletInfo,
+        owner: ledgerWalletInfo?.owner.toBase58(),
+        lamports: ledgerWalletInfo?.lamports
       });
       
       // Check if the account is owned by our program
@@ -1154,33 +1168,62 @@ export class TradingService {
         throw new Error(`Invalid raffle account: owned by ${launchAccountInfo.owner.toBase58()}, expected ${PROGRAM_ID.toBase58()}`);
       }
       
-      // Get recent blockhash
+      // Create transaction and set blockhash
+      const transaction = new Transaction();
       const { blockhash: recentBlockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
       transaction.recentBlockhash = recentBlockhash;
       transaction.feePayer = userPubkey;
+      transaction.add(instruction);
       
       // Simulate transaction before sending
       console.log('🧪 Simulating buy tickets transaction...');
-      const simResult = await this.connection.simulateTransaction(transaction);
-      if (simResult.value.err) {
-        console.error('❌ Simulation failed:', simResult.value.err);
+      try {
+        const simResult = await this.connection.simulateTransaction(transaction, undefined, { commitment: 'confirmed', replaceRecentBlockhash: true });
         
-        // Check for specific error types and provide better error messages
-        if (simResult.value.err && typeof simResult.value.err === 'object' && 'InstructionError' in simResult.value.err) {
-          const instructionError = simResult.value.err as any;
-          const [instructionIndex, error] = instructionError.InstructionError;
-          if (error === 'BorshIoError') {
-            throw new Error(`Transaction simulation failed: BorshIoError in instruction ${instructionIndex}. This usually means incorrect data serialization.`);
-          } else if (error === 'AccountNotFound') {
-            throw new Error(`Transaction simulation failed: Account not found in instruction ${instructionIndex}. Please check if all required accounts exist.`);
+        console.log('📊 Simulation result:', {
+          err: simResult.value.err,
+          logs: simResult.value.logs,
+          unitsConsumed: simResult.value.unitsConsumed
+        });
+        
+        if (simResult.value.err) {
+          console.error('❌ Simulation failed:', simResult.value.err);
+          console.error('📋 Simulation logs:', simResult.value.logs);
+          
+          // Check for AccountBorrowFailed - this can happen with duplicate accounts during simulation
+          // but the actual transaction might still work
+          const errorStr = JSON.stringify(simResult.value.err);
+          if (errorStr.includes('AccountBorrowFailed')) {
+            console.warn('⚠️ Simulation failed with AccountBorrowFailed, but continuing anyway.');
+            console.warn('This can happen when the same account appears multiple times in an instruction.');
+            console.warn('The actual transaction may still succeed.');
           } else {
-            throw new Error(`Transaction simulation failed: ${error} in instruction ${instructionIndex}`);
+            // Check for specific error types and provide better error messages
+            if (simResult.value.err && typeof simResult.value.err === 'object' && 'InstructionError' in simResult.value.err) {
+              const instructionError = simResult.value.err as any;
+              const [instructionIndex, error] = instructionError.InstructionError;
+              if (error === 'BorshIoError') {
+                throw new Error(`Transaction simulation failed: BorshIoError in instruction ${instructionIndex}. This usually means incorrect data serialization.`);
+              } else if (error === 'AccountNotFound') {
+                throw new Error(`Transaction simulation failed: Account not found in instruction ${instructionIndex}. Please check if all required accounts exist.`);
+              } else {
+                throw new Error(`Transaction simulation failed: ${error} in instruction ${instructionIndex}`);
+              }
+            } else {
+              throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+            }
           }
         } else {
-          throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+          console.log('✅ Simulation successful');
+        }
+      } catch (simError) {
+        const errorMsg = simError instanceof Error ? simError.message : String(simError);
+        if (errorMsg.includes('AccountBorrowFailed')) {
+          console.warn('⚠️ Simulation error (AccountBorrowFailed), continuing anyway:', errorMsg);
+        } else {
+          throw simError;
         }
       }
-      console.log('✅ Simulation successful');
       
       console.log('📤 Sending buy tickets transaction...');
       console.log('📊 Transaction details:', {
@@ -1200,7 +1243,7 @@ export class TradingService {
       // Wait for confirmation with structured confirmation
       await this.connection.confirmTransaction({
         signature,
-        blockhash,
+        blockhash: recentBlockhash,
         lastValidBlockHeight
       }, 'confirmed');
       

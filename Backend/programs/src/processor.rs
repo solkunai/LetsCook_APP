@@ -591,6 +591,9 @@ impl Processor {
             msg!("✅ Platform fee transferred to ledger wallet");
         }
         
+        // Drop the mutable borrow of launch_data before doing the transfer
+        drop(launch_data_bytes);
+        
         // Transfer remaining amount to raffle contract
         let transfer_instruction = system_instruction::transfer(
             user_sol_account.key,
@@ -608,39 +611,36 @@ impl Processor {
             &[],
         )?;
         
+        // Reborrow launch_data to update tickets_sold
+        let mut launch_data_bytes = launch_data.try_borrow_mut_data()?;
+        
         // Update the account data manually
         let new_tickets_sold = tickets_sold + num_tickets;
         
-        // Find the offset for tickets_sold and update it
-        let mut update_offset = 0;
-        update_offset += 2; // Skip account_type and launch_meta
-        update_offset += 1; // Skip plugins
-        update_offset += 10; // Skip last_interaction and num_interactions
+        // Find tickets_sold by searching for the current value
+        // We know tickets_sold is a u32, so search for the current value as bytes
+        let tickets_sold_bytes = tickets_sold.to_le_bytes();
+        let mut tickets_sold_offset: Option<usize> = None;
         
-        // Skip page_name
-        let page_name_len = u32::from_le_bytes([
-            launch_data_bytes[update_offset],
-            launch_data_bytes[update_offset + 1],
-            launch_data_bytes[update_offset + 2],
-            launch_data_bytes[update_offset + 3],
-        ]) as usize;
-        update_offset += 4 + page_name_len;
+        // Search for tickets_sold in the data
+        for i in 0..(launch_data_bytes.len() - 4) {
+            if launch_data_bytes[i] == tickets_sold_bytes[0] &&
+               launch_data_bytes[i + 1] == tickets_sold_bytes[1] &&
+               launch_data_bytes[i + 2] == tickets_sold_bytes[2] &&
+               launch_data_bytes[i + 3] == tickets_sold_bytes[3] {
+                tickets_sold_offset = Some(i);
+                msg!("📊 Found tickets_sold at offset: {}", i);
+                break;
+            }
+        }
         
-        // Skip listing
-        let listing_len = u32::from_le_bytes([
-            launch_data_bytes[update_offset],
-            launch_data_bytes[update_offset + 1],
-            launch_data_bytes[update_offset + 2],
-            launch_data_bytes[update_offset + 3],
-        ]) as usize;
-        update_offset += 4 + listing_len;
-        
-        update_offset += 8; // Skip total_supply
-        update_offset += 4; // Skip num_mints
-        update_offset += 8; // Skip ticket_price
-        update_offset += 8; // Skip minimum_liquidity
-        update_offset += 8; // Skip launch_date
-        update_offset += 8; // Skip end_date
+        let update_offset = match tickets_sold_offset {
+            Some(offset) => offset,
+            None => {
+                msg!("❌ Could not find tickets_sold field in account data");
+                return Err(ProgramError::InvalidAccountData);
+            }
+        };
         
         // Update tickets_sold
         launch_data_bytes[update_offset..update_offset + 4].copy_from_slice(&new_tickets_sold.to_le_bytes());

@@ -60,8 +60,8 @@ import { Buffer } from 'buffer';
 
 const STEPS = ['basic', 'dex', 'config', 'social', 'review'];
 
-// Placeholder wallet address for fees - replace with actual fee wallet
-const LEDGER_WALLET = new PublicKey('8fvPxVrPp1p3QGwjiFQVYg5xpBTVrWrarrUxQryftUZV');
+// Ledger wallet for platform fees - loaded from environment variable
+const LEDGER_WALLET = new PublicKey(import.meta.env.VITE_LEDGER_WALLET || 'A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
 
 export default function CreateRafflePage() {
   const { connected, publicKey, wallet, sendTransaction } = useWallet();

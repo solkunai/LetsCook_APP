@@ -41,6 +41,7 @@ import { toast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { raffleService } from '@/lib/raffleService';
 import { blockchainIntegrationService } from '@/lib/blockchainIntegrationService';
+import { raffleBlockchainService } from '@/lib/raffleBlockchainService';
 import VotingComponent from '@/components/VotingComponent';
 import MarketMakingRewards from '@/components/MarketMakingRewards';
 
@@ -137,12 +138,15 @@ export default function RaffleDetailPage() {
 
       console.log('🔍 Fetching raffle data for ID:', raffleId);
       
-      // Clear cache to ensure we get fresh data for this specific raffle
-      console.log('🗑️ Clearing cache to get fresh raffle data...');
-      blockchainIntegrationService.clearCache();
+      // Use the new raffle blockchain service
+      let raffleData = await raffleBlockchainService.getRaffleById(raffleId);
       
-      // Use dedicated raffle service to fetch the raffle data
-      const raffleData = await raffleService.fetchRaffleById(raffleId);
+      // Fallback to old service if new one fails
+      if (!raffleData) {
+        console.log('⚠️ New service failed, trying old service...');
+        blockchainIntegrationService.clearCache();
+        raffleData = await raffleService.fetchRaffleById(raffleId);
+      }
       
       if (raffleData) {
         setRaffleData(raffleData);
@@ -174,7 +178,7 @@ export default function RaffleDetailPage() {
 
     try {
       // Fetch real user ticket data from blockchain
-      const userTicketData = await raffleService.getUserTicketData(raffleData.id, publicKey.toBase58());
+      const userTicketData = await raffleService.getUserTickets(raffleData.id, publicKey.toBase58());
       if (userTicketData) {
         setUserTickets(userTicketData.ticketCount);
         setUserTicketNumbers(userTicketData.ticketNumbers);

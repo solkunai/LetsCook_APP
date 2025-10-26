@@ -287,7 +287,7 @@ export class BlockchainIntegrationService {
   /**
    * Parse launch account data synchronously (no API calls)
    */
-  private async parseLaunchAccountDataSync(data: Buffer, accountPubkey: PublicKey): Promise<BlockchainLaunchData | null> {
+  async parseLaunchAccountDataSync(data: Buffer, accountPubkey: PublicKey): Promise<BlockchainLaunchData | null> {
     try {
       // Check if account is initialized (not all zeros)
       const isAllZeros = data.every(byte => byte === 0);
@@ -299,7 +299,8 @@ export class BlockchainIntegrationService {
       // Check if this looks like a LaunchData account by checking account_type
       const accountType = data.readUInt8(0);
       console.log(`  📝 Account ${accountPubkey.toBase58()} type: ${accountType} (0=Launch, 1=Program, 2=User, 3=Join)`);
-      if (accountType !== 0) { // 0 = Launch
+      // Temporarily accept both type 0 (Launch) and type 1 (Program) due to account corruption issues
+      if (accountType !== 0 && accountType !== 1) {
         console.log(`  ⏭️ Skipping account - not a Launch account (type=${accountType})`);
         return null;
       }
