@@ -3,6 +3,9 @@ node_modules
 .env.local
 .env.production
 .env.development
+devnet.env
+client/devnet.env
+frontend/client/devnet.env
 client/.env
 client/.env.local
 client/.env.production
