@@ -114,14 +114,22 @@ pub fn join_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], arg
             num_tickets_checked: 0,
             num_winning_tickets: 0,
             random_address: *ctx.accounts.orao_random.key,
+            order_id: String::new(), // Will be set after purchase
         };
+
+        let join_data_len = to_vec(&temp)
+            .map_err(|e| {
+                msg!("Failed to serialize JoinData: {:?}", e);
+                ProgramError::InvalidAccountData
+            })?
+            .len();
 
         utils::create_program_account(
             ctx.accounts.user,
             ctx.accounts.join_data,
             program_id,
             user_join_bump,
-            to_vec(&temp).unwrap().len(),
+            join_data_len,
             vec![&ctx.accounts.user.key.to_bytes(), &launch_data.page_name.as_bytes(), b"Joiner"],
         )?;
 

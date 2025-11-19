@@ -10,9 +10,11 @@ use solana_program::{
     program_pack::Pack,
     pubkey::Pubkey,
     rent, system_instruction,
+    sysvar::Sysvar,
 };
 
 use spl_associated_token_account::instruction::create_associated_token_account;
+use spl_associated_token_account::get_associated_token_address_with_program_id;
 use spl_token_2022::instruction as tokenInstruction;
 
 use std::mem;
@@ -211,6 +213,13 @@ fn transfer_t22_tokens<'a>(
     decimals: u8,
     transfer_hook_accounts: &Vec<&AccountInfo<'a>>,
 ) -> ProgramResult {
+    msg!("🔄 TRANSFER_START: Token-2022 transfer_checked");
+    msg!("  Amount: {} (raw), {:.9} (human)", amount, amount as f64 / 10_f64.powi(decimals as i32));
+    msg!("  Source: {}", token_source_account.key);
+    msg!("  Destination: {}", token_dest_account.key);
+    msg!("  Authority: {}", authority_account.key);
+    msg!("  Mint: {}", token_mint_account.key);
+    
     let mut ix = spl_token_2022::instruction::transfer_checked(
         token_program_2022_account.key,
         token_source_account.key,
@@ -247,26 +256,31 @@ fn transfer_t22_tokens<'a>(
 
     if seed.len() == 0 {
         // submit transaction
-        msg!("submitting user signed transfer");
+        msg!("🔄 TRANSFER_EXEC: User-signed transfer (no PDA seeds)");
         invoke(&ix, &account_infos)?;
+        msg!("✅ TRANSFER_SUCCESS: User-signed transfer completed");
     }
 
     // Sign and submit transaction
     if seed.len() == 1 {
-        // Sign and submit transaction
+        msg!("🔄 TRANSFER_EXEC: PDA-signed transfer (1 seed)");
         invoke_signed(&ix, &account_infos, &[&[seed[0], &[bump_seed]]])?;
+        msg!("✅ TRANSFER_SUCCESS: PDA-signed transfer completed");
     }
 
     if seed.len() == 2 {
-        // Sign and submit transaction
+        msg!("🔄 TRANSFER_EXEC: PDA-signed transfer (2 seeds)");
         invoke_signed(&ix, &account_infos, &[&[seed[0], seed[1], &[bump_seed]]])?;
+        msg!("✅ TRANSFER_SUCCESS: PDA-signed transfer completed");
     }
 
     if seed.len() == 3 {
-        // Sign and submit transaction
+        msg!("🔄 TRANSFER_EXEC: PDA-signed transfer (3 seeds)");
         invoke_signed(&ix, &account_infos, &[&[seed[0], seed[1], seed[2], &[bump_seed]]])?;
+        msg!("✅ TRANSFER_SUCCESS: PDA-signed transfer completed");
     }
 
+    msg!("✅ TRANSFER_END: Transfer function completed successfully");
     Ok(())
 }
 
@@ -276,13 +290,93 @@ pub fn create_ata<'a>(
     token_mint_account: &AccountInfo<'a>,
     new_token_account: &AccountInfo<'a>,
     token_program_account: &AccountInfo<'a>,
+    system_program: &AccountInfo<'a>,
+    associated_token_program: &AccountInfo<'a>,
 ) -> ProgramResult {
-    if **new_token_account.try_borrow_lamports()? > 0 {
-        msg!("Token account is already initialised.");
+    // Log all account lamports for debugging
+    msg!("💰 Account lamports check:");
+    msg!("  Funding account: {} lamports", **funding_account.try_borrow_lamports()?);
+    msg!("  Token account: {} lamports", **new_token_account.try_borrow_lamports()?);
+    msg!("  Mint account: {} lamports", **token_mint_account.try_borrow_lamports()?);
+    
+    let token_account_lamports = **new_token_account.try_borrow_lamports()?;
+    
+    if token_account_lamports > 0 {
+        msg!("Token account already exists (has {} lamports)", token_account_lamports);
+        
+        // Verify existing account has enough rent
+        let rent_sysvar = rent::Rent::get()?;
+        let required_rent = rent_sysvar.minimum_balance(spl_token_2022::state::Account::LEN);
+        msg!("  Required rent: {} lamports", required_rent);
+        
+        if token_account_lamports < required_rent {
+            msg!("⚠️ Existing token account has insufficient rent!");
+            msg!("  Current: {} lamports, Required: {} lamports", token_account_lamports, required_rent);
+            
+            // Add buffer for safety
+            let rent_buffer = 1_000_000u64; // 0.001 SOL buffer
+            let required_rent_with_buffer = required_rent.saturating_add(rent_buffer);
+            let additional_lamports = required_rent_with_buffer.saturating_sub(token_account_lamports);
+            
+            msg!("  Transferring {} lamports to cover rent", additional_lamports);
+            
+            // Transfer additional lamports to cover rent
+            invoke(
+                &system_instruction::transfer(
+                    funding_account.key,
+                    new_token_account.key,
+                    additional_lamports,
+                ),
+                &[
+                    funding_account.clone(),
+                    new_token_account.clone(),
+                    system_program.clone(),
+                ],
+            )?;
+            
+            let account_lamports_after = **new_token_account.try_borrow_lamports()?;
+            msg!("✅ Token account topped up: {} lamports (required: {})", account_lamports_after, required_rent);
+        } else {
+            msg!("✅ Existing token account has sufficient rent");
+        }
         return Ok(());
     }
 
-    msg!("creating Token account");
+    msg!("Creating Token-2022 associated token account");
+    msg!("  Owner: {}", wallet_account.key);
+    msg!("  Mint: {}", token_mint_account.key);
+    msg!("  Token account: {}", new_token_account.key);
+    
+    // Calculate required rent for Token-2022 account (165 bytes)
+    let rent_sysvar = rent::Rent::get()?;
+    let required_rent = rent_sysvar.minimum_balance(spl_token_2022::state::Account::LEN);
+    let rent_buffer = 1_000_000u64; // 0.001 SOL buffer
+    let required_rent_with_buffer = required_rent.saturating_add(rent_buffer);
+    msg!("  Required rent: {} lamports (base: {} + buffer: {})", required_rent_with_buffer, required_rent, rent_buffer);
+    
+    // Verify funding account has enough SOL
+    let funding_lamports = **funding_account.try_borrow_lamports()?;
+    if funding_lamports < required_rent_with_buffer {
+        msg!("❌ Error: Funding account has insufficient SOL for ATA creation!");
+        msg!("  Funding account: {} lamports, Required: {} lamports", funding_lamports, required_rent_with_buffer);
+        return Err(ProgramError::InsufficientFunds);
+    }
+    
+    // Derive ATA address to verify it matches
+    let expected_ata = spl_associated_token_account::get_associated_token_address_with_program_id(
+        wallet_account.key,
+        token_mint_account.key,
+        token_program_account.key,
+    );
+    
+    if new_token_account.key != &expected_ata {
+        msg!("❌ Error: ATA address mismatch!");
+        msg!("  Expected: {}", expected_ata);
+        msg!("  Received: {}", new_token_account.key);
+        return Err(ProgramError::InvalidAccountData);
+    }
+    msg!("✅ ATA address verified: {}", new_token_account.key);
+    
     let create_ata_idx = create_associated_token_account(
         &funding_account.key,
         &wallet_account.key,
@@ -290,16 +384,65 @@ pub fn create_ata<'a>(
         &token_program_account.key,
     );
 
+    // For Token-2022 ATA creation via CPI, required accounts MUST be in this exact order:
+    // The instruction builder creates AccountMetas in this order, so we must match it:
+    // 0. payer (funding_account) - signer, writable
+    // 1. ata_account (new_token_account) - writable
+    // 2. owner (wallet_account) - not signer (can be same as payer)
+    // 3. mint (token_mint_account)
+    // 4. system_program
+    // 5. token_program (token_program_account - Token-2022)
+    // 6. associated_token_program
+    msg!("  Invoking ATA creation with 7 accounts in correct order");
+    msg!("  Payer: {}", funding_account.key);
+    msg!("  ATA: {}", new_token_account.key);
+    msg!("  Owner: {}", wallet_account.key);
+    msg!("  Mint: {}", token_mint_account.key);
+    
     invoke(
         &create_ata_idx,
         &[
-            funding_account.clone(),
-            new_token_account.clone(),
-            wallet_account.clone(),
-            token_mint_account.clone(),
-            token_program_account.clone(),
+            funding_account.clone(),      // [0] payer (signer, writable)
+            new_token_account.clone(),    // [1] ata_account (writable)
+            wallet_account.clone(),       // [2] owner
+            token_mint_account.clone(),   // [3] mint
+            system_program.clone(),       // [4] system_program
+            token_program_account.clone(), // [5] token_program (Token-2022)
+            associated_token_program.clone(), // [6] associated_token_program
         ],
     )?;
+    
+    msg!("✅ ATA creation CPI completed successfully");
+    
+    // Verify ATA has enough rent after creation
+    let account_lamports_after = **new_token_account.try_borrow_lamports()?;
+    msg!("🔍 Verifying ATA after creation:");
+    msg!("  Account lamports: {}", account_lamports_after);
+    msg!("  Required rent: {} lamports", required_rent);
+    
+    if account_lamports_after < required_rent {
+        msg!("⚠️ Warning: ATA may have insufficient rent after creation!");
+        msg!("  Account: {} lamports, Required: {} lamports", account_lamports_after, required_rent);
+        // Top up if needed
+        let additional_lamports = required_rent_with_buffer.saturating_sub(account_lamports_after);
+        if additional_lamports > 0 {
+            msg!("  Topping up with {} lamports", additional_lamports);
+            invoke(
+                &system_instruction::transfer(
+                    funding_account.key,
+                    new_token_account.key,
+                    additional_lamports,
+                ),
+                &[
+                    funding_account.clone(),
+                    new_token_account.clone(),
+                    system_program.clone(),
+                ],
+            )?;
+        }
+    } else {
+        msg!("✅ ATA has sufficient lamports for rent");
+    }
 
     Ok(())
 }
@@ -310,6 +453,8 @@ pub fn check_and_create_ata<'a>(
     token_mint_account: &'a AccountInfo<'a>,
     new_token_account: &'a AccountInfo<'a>,
     token_program_account: &'a AccountInfo<'a>,
+    system_program: &'a AccountInfo<'a>,
+    associated_token_program: &'a AccountInfo<'a>,
 ) -> ProgramResult {
     accounts::check_token_account(wallet_account, token_mint_account, new_token_account, token_program_account)?;
 
@@ -319,6 +464,8 @@ pub fn check_and_create_ata<'a>(
         token_mint_account,
         new_token_account,
         token_program_account,
+        system_program,
+        associated_token_program,
     )?;
 
     Ok(())

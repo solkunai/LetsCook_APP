@@ -11,6 +11,7 @@ use crate::{
     accounts,
     hybrid::{CollectionData, CollectionMeta, CollectionPlugin, NFTAssignment},
     instruction::accounts::MintNFTAccounts,
+    utils::mpl_compat::convert_mpl_error,
 };
 
 use crate::state;
@@ -365,13 +366,16 @@ pub fn mint_nft<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>]) -> Pro
         assignment_data.nft_index,
     )?;
 
-    let _transfer = TransferV1CpiBuilder::new(ctx.accounts.core_program)
-        .asset(ctx.accounts.asset)
-        .authority(Some(ctx.accounts.cook_pda))
-        .payer(ctx.accounts.user)
-        .new_owner(ctx.accounts.user)
-        .collection(Some(ctx.accounts.collection))
-        .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])?;
+    unsafe {
+        let _transfer = TransferV1CpiBuilder::new(unsafe { std::mem::transmute(ctx.accounts.core_program) })
+            .asset(unsafe { std::mem::transmute(ctx.accounts.asset) })
+            .authority(Some(unsafe { std::mem::transmute(ctx.accounts.cook_pda) }))
+            .payer(unsafe { std::mem::transmute(ctx.accounts.user) })
+            .new_owner(unsafe { std::mem::transmute(ctx.accounts.user) })
+            .collection(Some(unsafe { std::mem::transmute(ctx.accounts.collection) }))
+            .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])
+            .map_err(|e| convert_mpl_error(e))?;
+    }
 
     // if not we just need to transfer it from the program
 

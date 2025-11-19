@@ -60,11 +60,6 @@ pub mod core_account {
     declare_id!("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 }
 
-pub mod metaplex_account {
-    use super::*;
-    declare_id!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-}
-
 pub mod open_book_market_dev {
     use super::*;
     declare_id!("EoTcMgcDRTJVZDMZWBoU6rhYHZfkNTVEAfz3uUJRcYGj");
@@ -141,14 +136,7 @@ pub fn check_core_key<'a>(account_info: &'a AccountInfo<'a>) -> ProgramResult {
     return Ok(());
 }
 
-pub fn check_metaplex_key<'a>(account_info: &'a AccountInfo<'a>) -> ProgramResult {
-    if account_info.key != &metaplex_account::ID {
-        msg!("expected metaplex {} {}", metaplex_account::ID, account_info.key);
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    return Ok(());
-}
+// Metaplex removed - using Token-2022 metadata only
 
 pub fn check_wrapped_sol_key<'a>(account_info: &'a AccountInfo<'a>) -> ProgramResult {
     if account_info.key != &wrapped_sol_mint_account::ID {

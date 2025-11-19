@@ -6,7 +6,7 @@ use solana_program::{
 use crate::{
     accounts,
     instruction::accounts::ClaimTokensAccounts,
-    launch::{Distribution, JoinData, LaunchData, LaunchFlags, LaunchKeys, LaunchMeta, Listing, TicketStatus, IDO},
+    launch::{Distribution, JoinData, LaunchData, LaunchFlags, LaunchKeys, LaunchMeta, Listing, TicketStatus, IDO, create_pool_on_graduation},
     utils,
 };
 
@@ -186,6 +186,8 @@ pub fn claim_tokens<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>]) ->
         ctx.accounts.base_token_mint,
         ctx.accounts.user_base,
         ctx.accounts.base_token_program,
+        ctx.accounts.system_program,
+        ctx.accounts.associated_token,
     )?;
 
     let total_token_amount = launch_data.total_supply * u64::pow(10, listing.decimals as u32);
@@ -236,6 +238,44 @@ pub fn claim_tokens<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>]) ->
     )?;
 
     join_data.ticket_status = TicketStatus::WinningClaimed;
+
+    // Check if this is the first claim and pool should be created (raffle graduation)
+    let was_first_claim = launch_data.flags[LaunchFlags::LPState as usize] != 2; // LPState != 2 means not set up yet
+    
+    if was_first_claim {
+        msg!("🚀 First claim detected! Checking if pool should be created...");
+        
+        // Calculate total SOL collected from ticket sales
+        let total_sol_collected = launch_data.tickets_sold as u64 * launch_data.ticket_price;
+        
+        // Call the pool creation function
+        create_pool_on_graduation(
+            program_id,
+            accounts,
+            &mut launch_data,
+            &listing,
+            total_sol_collected,
+        )?;
+        
+        // Emit events after pool creation
+        let dex_provider = launch_data.buffer1;
+        let liquidity_sol_amount = total_sol_collected / 2;
+        let liquidity_token_amount = (launch_data.total_supply * u64::pow(10, listing.decimals as u32)) / 2;
+        
+        msg!(
+            "EVENT:POOL_CREATED:token_mint:{}:dex_provider:{}:sol_amount:{}:token_amount:{}",
+            ctx.accounts.base_token_mint.key,
+            dex_provider,
+            liquidity_sol_amount,
+            liquidity_token_amount
+        );
+        
+        msg!(
+            "EVENT:TRADING_STARTED:token_mint:{}:dex_provider:{}",
+            ctx.accounts.base_token_mint.key,
+            dex_provider
+        );
+    }
 
     launch_data.serialize(&mut &mut ctx.accounts.launch_data.data.borrow_mut()[..])?;
     join_data.serialize(&mut &mut ctx.accounts.join_data.data.borrow_mut()[..])?;

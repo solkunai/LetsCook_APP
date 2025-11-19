@@ -10,6 +10,7 @@ use crate::{
     accounts,
     hybrid::{CollectionKeys, CollectionMeta},
     instruction::accounts::WrapNFTAccounts,
+    utils::mpl_compat::convert_mpl_error,
 };
 
 use crate::state;
@@ -96,6 +97,8 @@ pub fn wrap_nft<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>]) -> Pro
         ctx.accounts.token_mint,
         ctx.accounts.user_token,
         ctx.accounts.token_program,
+        ctx.accounts.system_program,
+        ctx.accounts.associated_token,
     )?;
 
     let mint_data = ctx.accounts.token_mint.data.borrow();
@@ -163,10 +166,12 @@ pub fn wrap_nft<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>]) -> Pro
         CollectionMeta::RandomFixedSupply(ref mut args) => {
             // we only care about lookups for fixed supply collections
 
-            let (_, attributes, _) = mpl_core::fetch_plugin::<mpl_core::accounts::BaseAssetV1, mpl_core::types::Attributes>(
-                ctx.accounts.asset,
-                mpl_core::types::PluginType::Attributes,
-            )?;
+            let (_, attributes, _) = unsafe {
+                mpl_core::fetch_plugin::<mpl_core::accounts::BaseAssetV1, mpl_core::types::Attributes>(
+                    unsafe { std::mem::transmute(ctx.accounts.asset) },
+                    mpl_core::types::PluginType::Attributes,
+                )
+            }.map_err(|e| convert_mpl_error(e))?;
 
             let asset_index = attributes.attribute_list[0].value.parse::<u32>().unwrap();
 
@@ -199,13 +204,16 @@ pub fn wrap_nft<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>]) -> Pro
     }
 
     // burn the asset
-    mpl_core::instructions::BurnV1CpiBuilder::new(ctx.accounts.core_program)
-        .asset(ctx.accounts.asset)
-        .collection(Some(ctx.accounts.collection))
-        .authority(Some(ctx.accounts.user))
-        .payer(ctx.accounts.user)
-        .system_program(Some(ctx.accounts.system_program))
-        .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])?;
+    unsafe {
+        mpl_core::instructions::BurnV1CpiBuilder::new(unsafe { std::mem::transmute(ctx.accounts.core_program) })
+            .asset(unsafe { std::mem::transmute(ctx.accounts.asset) })
+            .collection(Some(unsafe { std::mem::transmute(ctx.accounts.collection) }))
+            .authority(Some(unsafe { std::mem::transmute(ctx.accounts.user) }))
+            .payer(unsafe { std::mem::transmute(ctx.accounts.user) })
+            .system_program(Some(unsafe { std::mem::transmute(ctx.accounts.system_program) }))
+            .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])
+            .map_err(|e| convert_mpl_error(e))?;
+    }
 
     Ok(())
 }

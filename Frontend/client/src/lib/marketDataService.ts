@@ -1,5 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { InstantLaunchMarketDataService } from './instantLaunchMarketDataService';
+import { pythPriceService } from './pythPriceService';
 
 export interface MarketData {
   price: number;
@@ -107,14 +109,26 @@ class MarketDataService {
       // Get real trading volume from recent transactions
       const volume24h = await this.getTradingVolume24h(tokenMint);
       
-      // Get real price from Jupiter API as backup
-      const jupiterPrice = await this.getJupiterPrice(tokenMint);
+      // Get token price using Pyth Network (with fallback to pool reserves)
+      const tokenPrice = await pythPriceService.getTokenPrice(
+        tokenMint,
+        ammData.solReserves,
+        ammData.tokenReserves
+      );
       
-      const currentPrice = jupiterPrice && jupiterPrice > 0 ? jupiterPrice : ammData.price;
+      // Use Pyth price if available, otherwise use AMM price
+      const currentPrice = tokenPrice > 0 ? tokenPrice : ammData.price;
       
-      const circulatingSupply = ammData.tokenReserves;
-      const marketCap = currentPrice * circulatingSupply;
-      const liquidity = ammData.solReserves;
+      // Calculate circulating supply: total supply - tokens in AMM pool
+      const circulatingSupply = totalSupply 
+        ? Math.max(0, totalSupply - ammData.tokenReserves)
+        : ammData.tokenReserves;
+      
+      // Market cap = circulating_supply * token_price
+      const marketCap = circulatingSupply * currentPrice;
+      
+      // Liquidity = total SOL in pool (quote reserves * 2 for 50/50 pool)
+      const liquidity = ammData.solReserves * 2;
       
       // Calculate price changes (we'll need historical data for this)
       const priceChange24h = await this.getPriceChange24h(tokenMint, currentPrice);
@@ -138,6 +152,20 @@ class MarketDataService {
         data: marketData,
         timestamp: Date.now()
       });
+      
+      // Index price data for historical tracking and charts
+      try {
+        const { priceIndexerService } = await import('./priceIndexerService');
+        await priceIndexerService.indexPriceData(
+          tokenMint,
+          marketData.price,
+          marketData.volume24h,
+          marketData.liquidity,
+          marketData.marketCap
+        );
+      } catch (error) {
+        console.warn('⚠️ Error indexing price data:', error);
+      }
       
       // Real market data fetched - no logging
       return marketData;
@@ -208,7 +236,7 @@ class MarketDataService {
       // Get AMM account
       const [ammAccount] = PublicKey.findProgramAddressSync(
         [Buffer.from('amm'), tokenMintKey.toBuffer()],
-        new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ') // PROGRAM_ID
+        new PublicKey('J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg') // PROGRAM_ID
       );
       
       // Get current AMM data
@@ -297,8 +325,8 @@ class MarketDataService {
         }
       }
       
-      // Fallback to current price with some variation
-      return currentPrice * (0.95 + Math.random() * 0.1); // ±5% variation
+      // Fallback to current price
+      return currentPrice;
     } catch (error) {
       console.warn('Error extracting price from transaction:', error);
       return currentPrice;
@@ -325,10 +353,10 @@ class MarketDataService {
         return totalVolume / 1e9; // Convert lamports to SOL
       }
       
-      return Math.random() * 10; // Fallback random volume
+      return 0; // No volume data available
     } catch (error) {
       console.warn('Error extracting volume from transaction:', error);
-      return Math.random() * 10;
+      return 0; // No volume data available
     }
   }
 
@@ -363,14 +391,14 @@ class MarketDataService {
         const timeDiff = Math.abs(timestamp - closest.timestamp);
         if (timeDiff > step * 2) {
           // Add some variation for gaps
-          price = closest.price * (0.98 + Math.random() * 0.04); // ±2% variation
+          price = closest.price; // Use closest historical price
         }
       }
       
       filledHistory.push({
         timestamp,
         price,
-        volume: closest.volume || Math.random() * 5
+        volume: closest.volume || 0
       });
     }
     
@@ -379,18 +407,16 @@ class MarketDataService {
 
   // Fallback market data when blockchain data is unavailable
   private async simulateMarketData(tokenMint: string): Promise<MarketData> {
-      // Using fallback market data - no logging
-    
-    // Return minimal fallback data
+    // Return zero/empty data when blockchain data is unavailable
     return {
-      price: 0.00003, // Default starting price
-      marketCap: 30, // Minimal market cap
-      volume24h: 0, // No volume
-      liquidity: 0, // No liquidity
-      holders: 0, // No holders
-      priceChange24h: 0, // No change
-      priceChange1h: 0, // No change
-      priceChange7d: 0, // No change
+      price: 0,
+      marketCap: 0,
+      volume24h: 0,
+      liquidity: 0,
+      holders: 0,
+      priceChange24h: 0,
+      priceChange1h: 0,
+      priceChange7d: 0,
       lastUpdated: Date.now()
     };
   }
@@ -426,38 +452,272 @@ class MarketDataService {
     return history;
   }
 
-  // Get AMM account data (real implementation)
+  // Get AMM account data (real implementation - parses actual AMM account structure)
   async getAMMAccountData(tokenMint: string): Promise<{
     solReserves: number;
     tokenReserves: number;
     price: number;
   } | null> {
     try {
+      const { PROGRAM_ID } = await import('./nativeProgram');
+      const { getAccount } = await import('@solana/spl-token');
+      const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
       const tokenMintKey = new PublicKey(tokenMint);
       
-      const [ammAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenMintKey.toBuffer()],
-        new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ')
-      );
+      // Use correct AMM PDA derivation matching backend: [baseMint, quoteMint, "CookAMM"] (sorted)
+      const baseFirst = tokenMintKey.toString() < WSOL_MINT.toString();
+      const ammSeeds = baseFirst
+        ? [tokenMintKey.toBuffer(), WSOL_MINT.toBuffer(), Buffer.from('CookAMM')]
+        : [WSOL_MINT.toBuffer(), tokenMintKey.toBuffer(), Buffer.from('CookAMM')];
+      
+      const [ammAccount] = PublicKey.findProgramAddressSync(ammSeeds, PROGRAM_ID);
       
       const accountInfo = await this.connection.getAccountInfo(ammAccount);
       if (!accountInfo || accountInfo.data.length === 0) {
+        console.log('AMM account not found for token:', tokenMint);
         return null;
       }
       
-      const solReserves = accountInfo.lamports / 1e9;
+      // Parse AMM account data structure (same as solanaProgram.ts)
+      const data = accountInfo.data;
+      const dataLength = data.length;
+      let offset = 0;
       
-      const BONDING_CURVE_BASE_RATE = 1000.0;
-      const price = (1 / BONDING_CURVE_BASE_RATE);
+      // Minimum required size check - be more lenient for smaller accounts
+      // AMM accounts can vary in size depending on initialization state
+      // Partially initialized accounts might be smaller, so we handle them gracefully
+      const MIN_REQUIRED_SIZE = 80; // Reduced from 232 to handle partially initialized accounts
+      if (dataLength < MIN_REQUIRED_SIZE) {
+        console.warn(`AMM account data too small: ${dataLength} bytes, falling back to token accounts`);
+        return await this.getAMMDataFromTokenAccounts(tokenMint);
+      }
       
-      const tokenReserves = solReserves * BONDING_CURVE_BASE_RATE;
+      // Skip account discriminator (1 byte)
+      offset += 1;
+      
+      // Skip pool (32 bytes)
+      offset += 32;
+      
+      // Skip ammProvider (1 byte)
+      offset += 1;
+      
+      // Skip base_mint (32 bytes)
+      offset += 32;
+      
+      // Skip quote_mint (32 bytes)
+      offset += 32;
+      
+      // Skip lp_mint (32 bytes)
+      offset += 32;
+      
+      // base_key (32 bytes) - token account for base token
+      if (offset + 32 > dataLength) {
+        console.warn('Buffer too small for base_key');
+        return await this.getAMMDataFromTokenAccounts(tokenMint);
+      }
+      const baseKey = new PublicKey(data.slice(offset, offset + 32));
+      offset += 32;
+      
+      // quote_key (32 bytes) - token account for quote token (SOL/WSOL)
+      if (offset + 32 > dataLength) {
+        console.warn('Buffer too small for quote_key');
+        return await this.getAMMDataFromTokenAccounts(tokenMint);
+      }
+      const quoteKey = new PublicKey(data.slice(offset, offset + 32));
+      offset += 32;
+      
+      // Skip fee (4 bytes)
+      offset += 4;
+      
+      // Skip numDataAccounts (4 bytes)
+      offset += 4;
+      
+      // lastPrice (8 bytes) - double
+      if (offset + 8 > dataLength) {
+        console.warn('Buffer too small for lastPrice');
+        return await this.getAMMDataFromTokenAccounts(tokenMint);
+      }
+      const lastPrice = data.readDoubleLE(offset);
+      offset += 8;
+      
+      // Skip lpAmount (8 bytes)
+      offset += 8;
+      
+      // Skip borrowCost (8 bytes)
+      offset += 8;
+      
+      // Skip leverageFrac (8 bytes)
+      offset += 8;
+      
+      // ammBaseAmount (8 bytes) - base token reserves in AMM
+      if (offset + 8 > dataLength) {
+        console.warn('Buffer too small for ammBaseAmount');
+        return await this.getAMMDataFromTokenAccounts(tokenMint);
+      }
+      const ammBaseAmount = data.readBigUInt64LE(offset);
+      offset += 8;
+      
+      // ammQuoteAmount (8 bytes) - quote token reserves in AMM
+      if (offset + 8 > dataLength) {
+        console.warn('Buffer too small for ammQuoteAmount');
+        return await this.getAMMDataFromTokenAccounts(tokenMint);
+      }
+      const ammQuoteAmount = data.readBigUInt64LE(offset);
+      offset += 8;
+      
+      // Get actual token account balances for verification
+      let solReserves = 0;
+      let tokenReserves = 0;
+      
+      try {
+        // Get quote token account (WSOL) balance
+        const quoteAccountInfo = await getAccount(this.connection, quoteKey);
+        solReserves = Number(quoteAccountInfo.amount) / 1e9; // WSOL has 9 decimals
+        
+        // Get base token account balance
+        const baseAccountInfo = await getAccount(this.connection, baseKey);
+        // Get decimals from mint account, not token account
+        const { getMint, TOKEN_2022_PROGRAM_ID } = await import('@solana/spl-token');
+        const mintInfo = await getMint(this.connection, tokenMintKey, 'confirmed', TOKEN_2022_PROGRAM_ID).catch(() => 
+          getMint(this.connection, tokenMintKey, 'confirmed')
+        );
+        tokenReserves = Number(baseAccountInfo.amount) / Math.pow(10, mintInfo.decimals);
+      } catch (error) {
+        console.warn('Could not fetch token account balances, using AMM account data:', error);
+        // Fallback to AMM account data
+        solReserves = Number(ammQuoteAmount) / 1e9;
+        tokenReserves = Number(ammBaseAmount) / 1e9; // Assuming 9 decimals for base token
+      }
+      
+      // Calculate price: quote per base (SOL per token)
+      // Price = quoteReserves / baseReserves
+      const price = tokenReserves > 0 ? solReserves / tokenReserves : (lastPrice > 0 ? lastPrice : 0);
+      
+      console.log('📊 AMM Data:', {
+        tokenMint,
+        solReserves,
+        tokenReserves,
+        price,
+        lastPrice
+      });
       
       return {
         solReserves,
         tokenReserves,
-        price
+        price: price || lastPrice || 0
       };
     } catch (error) {
+      console.error('Error parsing AMM account data:', error);
+      // Fallback: try to get data from token accounts directly
+      return await this.getAMMDataFromTokenAccounts(tokenMint);
+    }
+  }
+
+  // Cache for AMM token account data to reduce RPC calls
+  private ammTokenAccountCache: Map<string, { data: { solReserves: number; tokenReserves: number; price: number } | null; timestamp: number }> = new Map();
+  private readonly AMM_CACHE_DURATION = 30000; // 30 seconds cache
+
+  // Fallback method: Get AMM data from token accounts when account structure is unknown
+  private async getAMMDataFromTokenAccounts(tokenMint: string): Promise<{
+    solReserves: number;
+    tokenReserves: number;
+    price: number;
+  } | null> {
+    try {
+      // Check cache first
+      const cached = this.ammTokenAccountCache.get(tokenMint);
+      if (cached && Date.now() - cached.timestamp < this.AMM_CACHE_DURATION) {
+        console.log('📦 Using cached AMM token account data');
+        return cached.data;
+      }
+
+      const { PROGRAM_ID } = await import('./nativeProgram');
+      const { getAccount } = await import('@solana/spl-token');
+      const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+      const tokenMintKey = new PublicKey(tokenMint);
+      
+      // Use correct AMM PDA derivation matching backend: [baseMint, quoteMint, "CookAMM"] (sorted)
+      const baseFirst = tokenMintKey.toString() < WSOL_MINT.toString();
+      const ammSeeds = baseFirst
+        ? [tokenMintKey.toBuffer(), WSOL_MINT.toBuffer(), Buffer.from('CookAMM')]
+        : [WSOL_MINT.toBuffer(), tokenMintKey.toBuffer(), Buffer.from('CookAMM')];
+      
+      const [ammAccount] = PublicKey.findProgramAddressSync(ammSeeds, PROGRAM_ID);
+      
+      // Try to find token accounts associated with the AMM
+      // Get all token accounts owned by the AMM account
+      const splToken = await import('@solana/spl-token');
+      let tokenAccounts;
+      try {
+        tokenAccounts = await this.connection.getTokenAccountsByOwner(
+          ammAccount,
+          { programId: TOKEN_PROGRAM_ID }
+        );
+      } catch (error: any) {
+        // Handle 429 errors gracefully
+        if (error?.message?.includes('429') || error?.code === 429) {
+          console.warn('⚠️ Rate limited (429) when fetching token accounts, using cached data or returning null');
+          // Return cached data if available, even if expired
+          if (cached) {
+            return cached.data;
+          }
+          return null;
+        }
+        throw error;
+      }
+      
+      let solReserves = 0;
+      let tokenReserves = 0;
+      
+      for (const account of tokenAccounts.value) {
+        try {
+          const accountInfo = await getAccount(this.connection, account.pubkey);
+          const mint = accountInfo.mint.toBase58();
+          
+          if (mint === WSOL_MINT.toBase58()) {
+            solReserves = Number(accountInfo.amount) / 1e9;
+          } else if (mint === tokenMint) {
+            // Get decimals from mint account
+            const { getMint, TOKEN_2022_PROGRAM_ID } = await import('@solana/spl-token');
+            const mintInfo = await getMint(this.connection, tokenMintKey, 'confirmed', TOKEN_2022_PROGRAM_ID).catch(() => 
+              getMint(this.connection, tokenMintKey, 'confirmed')
+            );
+            tokenReserves = Number(accountInfo.amount) / Math.pow(10, mintInfo.decimals);
+          }
+        } catch (error) {
+          continue;
+        }
+      }
+      
+      if (solReserves === 0 && tokenReserves === 0) {
+        // Cache null result to avoid repeated calls
+        this.ammTokenAccountCache.set(tokenMint, { data: null, timestamp: Date.now() });
+        return null;
+      }
+      
+      // Calculate price
+      const price = tokenReserves > 0 ? solReserves / tokenReserves : 0;
+      
+      const result = {
+        solReserves,
+        tokenReserves,
+        price
+      };
+      
+      // Cache the result
+      this.ammTokenAccountCache.set(tokenMint, { data: result, timestamp: Date.now() });
+      
+      return result;
+    } catch (error: any) {
+      // Handle 429 errors gracefully
+      if (error?.message?.includes('429') || error?.code === 429) {
+        console.warn('⚠️ Rate limited (429) when getting AMM data, using cached data if available');
+        const cached = this.ammTokenAccountCache.get(tokenMint);
+        if (cached) {
+          return cached.data;
+        }
+      }
+      console.error('Error getting AMM data from token accounts:', error);
       return null;
     }
   }
@@ -517,12 +777,13 @@ class MarketDataService {
   // Get trading volume for last 24 hours
   async getTradingVolume24h(tokenMint: string): Promise<number> {
     try {
+      const { PROGRAM_ID } = await import('./nativeProgram');
       const tokenMintKey = new PublicKey(tokenMint);
       
       // Get AMM account
       const [ammAccount] = PublicKey.findProgramAddressSync(
         [Buffer.from('amm'), tokenMintKey.toBuffer()],
-        new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ')
+        PROGRAM_ID
       );
       
       // Get signatures for last 24 hours
@@ -557,7 +818,7 @@ class MarketDataService {
       return totalVolume;
     } catch (error) {
       console.error('Error calculating 24h volume:', error);
-      return Math.random() * 1000; // Fallback
+      return 0; // No volume data available
     }
   }
 
@@ -572,7 +833,7 @@ class MarketDataService {
         return ((currentPrice - oldestPrice) / oldestPrice) * 100;
       }
       
-      return (Math.random() - 0.5) * 20; // Fallback: -10% to +10%
+      return 0; // No price change data available
     } catch (error) {
       console.error('Error calculating 24h price change:', error);
       return (Math.random() - 0.5) * 20;
@@ -590,7 +851,7 @@ class MarketDataService {
         return ((currentPrice - oldestPrice) / oldestPrice) * 100;
       }
       
-      return (Math.random() - 0.5) * 5; // Fallback: -2.5% to +2.5%
+      return 0; // No price change data available
     } catch (error) {
       console.error('Error calculating 1h price change:', error);
       return (Math.random() - 0.5) * 5;
@@ -608,7 +869,7 @@ class MarketDataService {
         return ((currentPrice - oldestPrice) / oldestPrice) * 100;
       }
       
-      return (Math.random() - 0.5) * 50; // Fallback: -25% to +25%
+      return 0; // No price change data available
     } catch (error) {
       console.error('Error calculating 7d price change:', error);
       return (Math.random() - 0.5) * 50;

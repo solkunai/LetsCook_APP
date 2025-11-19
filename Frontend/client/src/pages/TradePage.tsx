@@ -40,7 +40,7 @@ import {
 } from '@/lib/tradingService';
 
 export default function TradePage() {
-  const { publicKey, connected, wallet } = useWallet();
+  const { publicKey, connected, wallet, signTransaction } = useWallet();
   const [activeTab, setActiveTab] = useState("trade");
   const [fromToken, setFromToken] = useState("SOL");
   const [toToken, setToToken] = useState("SPCY");
@@ -69,20 +69,25 @@ export default function TradePage() {
     }
   }, [connected, publicKey]);
 
-  // Load swap quote when amount changes
+  // Load swap quote when amount changes (with debouncing)
   useEffect(() => {
     if (fromAmount && fromTokenData && toTokenData && parseFloat(fromAmount) > 0) {
-      loadSwapQuote();
+      // Debounce swap quote loading to avoid too many API calls
+      const timeoutId = setTimeout(() => {
+        loadSwapQuote();
+      }, 500); // 500ms debounce
+      
+      return () => clearTimeout(timeoutId);
     } else {
       setSwapQuote(null);
       setToAmount("");
     }
   }, [fromAmount, fromToken, toToken]);
 
-  const loadTradingData = async () => {
+  const loadTradingData = async (forceRefresh: boolean = false) => {
     setIsLoading(true);
     try {
-      const tokens = await tradingService.getAvailableTokens();
+      const tokens = await tradingService.getAvailableTokens(forceRefresh);
       setAvailableTokens(tokens);
     } catch (error) {
       console.error('Error loading trading data:', error);
@@ -96,12 +101,12 @@ export default function TradePage() {
     }
   };
 
-  const loadUserData = async () => {
+  const loadUserData = async (forceRefresh: boolean = false) => {
     if (!publicKey) return;
     
     try {
       const [balances, positions, rewards] = await Promise.all([
-        tradingService.getUserBalances(publicKey),
+        tradingService.getUserBalances(publicKey, forceRefresh),
         tradingService.getUserLiquidityPositions(publicKey),
         tradingService.getMarketMakingRewards(publicKey)
       ]);
@@ -118,12 +123,32 @@ export default function TradePage() {
     if (!fromTokenData || !toTokenData || !fromAmount) return;
     
     try {
+      // Check cache first
+      const { tradeCache } = await import('@/lib/tradeCache');
+      const cacheKey = tradeCache.getSwapQuoteKey(
+        fromTokenData.mint.toBase58(),
+        toTokenData.mint.toBase58(),
+        parseFloat(fromAmount)
+      );
+      
+      const cached = tradeCache.getSwapQuote(cacheKey);
+      if (cached) {
+        console.log('📦 Using cached swap quote');
+        setSwapQuote(cached);
+        setToAmount(cached.outputAmount.toFixed(6));
+        return;
+      }
+      
+      // Fetch new quote
       const quote = await tradingService.getSwapQuote(
         fromTokenData.mint,
         toTokenData.mint,
         parseFloat(fromAmount),
         fromTokenData.dexProvider
       );
+      
+      // Cache the quote
+      tradeCache.setSwapQuote(cacheKey, quote);
       
       setSwapQuote(quote);
       setToAmount(quote.outputAmount.toFixed(6));
@@ -165,7 +190,7 @@ export default function TradePage() {
   };
 
   const handleSwap = async () => {
-    if (!connected || !wallet || !publicKey) {
+    if (!connected || !publicKey || !signTransaction) {
       toast({
         title: "Wallet Required",
         description: "Please connect your wallet to swap tokens.",
@@ -186,34 +211,47 @@ export default function TradePage() {
     setIsLoading(true);
     
     try {
-      // Find AMM for the token pair
-      const baseMint = fromTokenData?.mint;
-      const quoteMint = toTokenData?.mint;
-      
-      if (!baseMint || !quoteMint) {
-        throw new Error('Invalid token selection');
+      // Use tradingService for swap
+      if (fromToken === 'SOL') {
+        // Buying tokens with SOL
+        const result = await tradingService.buyTokensAMM(
+          toTokenData?.mint.toBase58() || '',
+          publicKey.toBase58(),
+          parseFloat(fromAmount),
+          signTransaction,
+          toTokenData?.dexProvider || 'cook'
+        );
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Swap failed');
+        }
+        
+        toast({
+          title: "Swap Successful",
+          description: `Swapped ${fromAmount} ${fromToken} for ${result.tokensReceived?.toFixed(6) || toAmount} ${toToken}`,
+        });
+      } else {
+        // Selling tokens for SOL
+        const result = await tradingService.sellTokensAMM(
+          fromTokenData?.mint.toBase58() || '',
+          publicKey.toBase58(),
+          parseFloat(fromAmount),
+          signTransaction,
+          fromTokenData?.dexProvider || 'cook'
+        );
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Swap failed');
+        }
+        
+        toast({
+          title: "Swap Successful",
+          description: `Swapped ${fromAmount} ${fromToken} for ${result.solReceived?.toFixed(6) || toAmount} ${toToken}`,
+        });
       }
 
-      // Build swap transaction
-      const transaction = await buildSwapTransaction(
-        baseMint, // This would be the AMM PDA
-        fromToken === 'SOL' ? 1 : 0, // side: 0 = buy, 1 = sell
-        Math.floor(parseFloat(fromAmount) * 1e9), // Convert to lamports
-        publicKey
-      );
-
-      // Sign and send transaction
-      const signedTransaction = await wallet.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signedTransaction.serialize());
-      await connection.confirmTransaction(signature);
-
-      toast({
-        title: "Swap Successful",
-        description: `Swapped ${fromAmount} ${fromToken} for ${toAmount} ${toToken}`,
-      });
-
-      // Refresh balances
-      await loadUserBalances();
+      // Refresh balances (force refresh after swap)
+      await loadUserData(true);
       
     } catch (error) {
       console.error('Swap error:', error);
@@ -228,7 +266,7 @@ export default function TradePage() {
   };
 
   const handleAddLiquidity = async (tokenSymbol: string, amount: number) => {
-    if (!connected || !wallet || !publicKey) {
+    if (!connected || !publicKey || !signTransaction) {
       toast({
         title: "Wallet Required",
         description: "Please connect your wallet to add liquidity.",
@@ -243,26 +281,55 @@ export default function TradePage() {
       const token = availableTokens.find(t => t.symbol === tokenSymbol);
       if (!token) throw new Error('Token not found');
 
-      // Build add liquidity transaction
-      const transaction = await buildAddLiquidityTransaction(
-        token.mint,
-        new PublicKey("11111111111111111111111111111111"), // WSOL mint
-        Math.floor(amount * 1e9), // Convert to lamports
-        publicKey
-      );
+      // Use tradingService to add liquidity for Cook DEX
+      if (token.dexProvider === 'cook') {
+        // Calculate token amount based on current price
+        const tokenAmount = amount / token.price;
+        
+        const result = await tradingService.addLiquidityCookDEX(
+          token.mint,
+          amount,
+          tokenAmount,
+          publicKey,
+          signTransaction
+        );
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to add liquidity');
+        }
+        
+        toast({
+          title: "Liquidity Added",
+          description: `Added ${amount} SOL liquidity for ${tokenSymbol}`,
+        });
+      } else {
+        // Use Raydium for liquidity
+        const { raydiumService } = await import('@/lib/raydiumService');
+        const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+        const poolAddress = await raydiumService.findPool(token.mint, WSOL_MINT);
+        
+        if (!poolAddress) {
+          throw new Error('Raydium pool not found for this token');
+        }
+        
+        const tokenAmount = amount / token.price;
+        const signature = await raydiumService.addLiquidity(
+          poolAddress,
+          publicKey,
+          token.mint,
+          WSOL_MINT,
+          BigInt(Math.floor(tokenAmount * 1e9)),
+          BigInt(Math.floor(amount * 1e9))
+        );
+        
+        toast({
+          title: "Liquidity Added",
+          description: `Added ${amount} SOL liquidity for ${tokenSymbol}`,
+        });
+      }
 
-      // Sign and send transaction
-      const signedTransaction = await wallet.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signedTransaction.serialize());
-      await connection.confirmTransaction(signature);
-
-      toast({
-        title: "Liquidity Added",
-        description: `Added ${amount} SOL liquidity for ${tokenSymbol}`,
-      });
-
-      // Refresh balances
-      await loadUserBalances();
+      // Refresh balances (force refresh after adding liquidity)
+      await loadUserData(true);
       
     } catch (error) {
       console.error('Add liquidity error:', error);
@@ -378,7 +445,7 @@ export default function TradePage() {
                         />
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        Balance: {userBalances[fromToken.toLowerCase()]?.toFixed(4) || '0.0000'} {fromToken}
+                        Balance: {(userBalances[fromToken.toLowerCase()] || userBalances[fromToken] || 0).toFixed(4)} {fromToken}
                       </div>
                     </div>
 
@@ -415,7 +482,7 @@ export default function TradePage() {
                         />
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        Balance: {userBalances[toToken.toLowerCase()]?.toFixed(4) || '0.0000'} {toToken}
+                        Balance: {(userBalances[toToken.toLowerCase()] || userBalances[toToken] || 0).toFixed(4)} {toToken}
                       </div>
                     </div>
 

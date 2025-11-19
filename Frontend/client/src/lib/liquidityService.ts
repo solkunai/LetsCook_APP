@@ -1,7 +1,8 @@
-import { Connection, PublicKey, AccountInfo } from '@solana/web3.js';
+import { Connection, PublicKey, AccountInfo, Transaction } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, getAccount } from '@solana/spl-token';
 import { realLaunchService } from './realLaunchService';
 import { PROGRAM_ID } from './nativeProgram';
+import { launchDataService } from './launchDataService';
 
 export interface LiquidityPool {
   id: string;
@@ -45,73 +46,167 @@ export class LiquidityService {
     this.connection = connection;
   }
 
-  // Get all available liquidity pools
-  async getLiquidityPools(): Promise<LiquidityPool[]> {
+  // Get all available liquidity pools (with caching)
+  async getLiquidityPools(forceRefresh: boolean = false): Promise<LiquidityPool[]> {
     try {
+      // Check cache first
+      if (!forceRefresh) {
+        const { tradeCache } = await import('./tradeCache');
+        const cached = tradeCache.getLiquidityPools();
+        if (cached) {
+          console.log('📦 Using cached liquidity pools');
+          return cached;
+        }
+      }
+
       const pools: LiquidityPool[] = [];
 
-      // Get Cook DEX pools
-      const cookPools = await this.getCookDEXPools();
+      // Get Cook DEX pools (with incremental loading)
+      const cookPools = await this.getCookDEXPools(forceRefresh);
       pools.push(...cookPools);
 
       // Get Raydium pools
       const raydiumPools = await this.getRaydiumPools();
       pools.push(...raydiumPools);
 
+      // Cache the results
+      const { tradeCache } = await import('./tradeCache');
+      tradeCache.setLiquidityPools(pools);
+
       return pools;
     } catch (error) {
       console.error('Error fetching liquidity pools:', error);
+      // Return cached data if available
+      const { tradeCache } = await import('./tradeCache');
+      const cached = tradeCache.getLiquidityPools();
+      if (cached) {
+        console.log('⚠️ Error fetching pools, using cached data');
+        return cached;
+      }
       return [];
     }
   }
 
-  // Get Cook DEX pools - REAL implementation
-  private async getCookDEXPools(): Promise<LiquidityPool[]> {
+  // Get Cook DEX pools - REAL implementation using launch data (with incremental loading)
+  private async getCookDEXPools(forceRefresh: boolean = false): Promise<LiquidityPool[]> {
     try {
-      // Query your program for active Cook DEX pools
-      // This would scan for AMM accounts with your program ID
-      const programAccounts = await this.connection.getProgramAccounts(PROGRAM_ID, {
-        filters: [
-          {
-            dataSize: 200, // Approximate size of AMM account
+      const { tradeCache } = await import('./tradeCache');
+      
+      // Check for new launches only if not forcing refresh
+      let launches;
+      if (!forceRefresh) {
+        const cachedLaunchIds = tradeCache.getLaunchIds();
+        if (cachedLaunchIds) {
+          // Only check for new launches
+          console.log('🔄 Checking for new launches for liquidity pools...');
+          const allLaunches = await launchDataService.getAllLaunches();
+          const allLaunchIds = allLaunches.map(l => l.id);
+          const newLaunchIds = tradeCache.updateLaunchCache(allLaunchIds);
+          
+          if (newLaunchIds.length === 0) {
+            // No new launches, use cached pools if available
+            const cached = tradeCache.getLiquidityPools();
+            if (cached) {
+              console.log('✅ No new launches, using cached pools');
+              // Filter to only Cook DEX pools
+              return cached.filter((p: LiquidityPool) => p.dexProvider === 'cook');
+            }
           }
-        ]
-      });
+          launches = allLaunches;
+        } else {
+          // First load - fetch all
+          launches = await launchDataService.getAllLaunches();
+          const allLaunchIds = launches.map(l => l.id);
+          tradeCache.updateLaunchCache(allLaunchIds);
+        }
+      } else {
+        // Force refresh - fetch all
+        console.log('🔄 Force refreshing all launches for liquidity pools...');
+        launches = await launchDataService.getAllLaunches();
+        const allLaunchIds = launches.map(l => l.id);
+        tradeCache.updateLaunchCache(allLaunchIds);
+      }
+      
+      // Filter for Cook DEX instant launches
+      const cookLaunches = launches.filter(
+        launch => launch.dexProvider === 0 && launch.launchType === 'instant'
+      );
 
       const pools: LiquidityPool[] = [];
 
-      for (const account of programAccounts) {
+      for (const launch of cookLaunches) {
         try {
-          // Parse AMM data from account
-          const accountData = account.account.data;
+          const tokenMint = new PublicKey(launch.baseTokenMint || launch.id);
+          const solMint = new PublicKey('So11111111111111111111111111111111111111112');
           
-          // This is simplified - you'd need proper Borsh deserialization
+          // Derive AMM PDA
+          const [ammPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from('amm'), tokenMint.toBuffer()],
+            PROGRAM_ID
+          );
+
+          // Get pool info from AMM account if it exists
+          const ammAccountInfo = await this.connection.getAccountInfo(ammPDA);
+          
+          if (!ammAccountInfo) {
+            // Pool doesn't exist yet, skip
+            continue;
+          }
+
+          // Get token metadata
+          const tokenSymbol = launch.rawMetadata?.tokenSymbol || launch.symbol || 'TOKEN';
+          const tokenName = launch.rawMetadata?.tokenName || launch.name || 'Token';
+          
+          // Get market data for liquidity calculation
+          let tokenAmount = 0;
+          let solAmount = 0;
+          let price = launch.initialPrice || 0.01;
+          let totalLiquidity = 0;
+          
+          try {
+            const { marketDataService } = await import('./marketDataService');
+            const marketData = await marketDataService.getMarketData(
+              tokenMint.toBase58(),
+              launch.totalSupply
+            );
+            price = marketData.price || price;
+            totalLiquidity = marketData.liquidity || 0;
+            
+            // Estimate amounts from liquidity
+            if (totalLiquidity > 0) {
+              solAmount = totalLiquidity / 2; // 50/50 split
+              tokenAmount = solAmount / price;
+            }
+          } catch (error) {
+            console.warn('Could not fetch market data for pool:', error);
+          }
+
           const pool: LiquidityPool = {
-            id: `cook-${account.pubkey.toString().slice(0, 8)}`,
+            id: `cook-${tokenMint.toBase58().slice(0, 8)}`,
             tokenA: {
-              symbol: 'TOKEN',
-              mint: new PublicKey('11111111111111111111111111111111'), // Would be real mint
-              amount: 1000000,
-              price: 0.000123
+              symbol: tokenSymbol,
+              mint: tokenMint,
+              amount: tokenAmount,
+              price: price
             },
             tokenB: {
               symbol: 'SOL',
-              mint: new PublicKey('So11111111111111111111111111111111111111112'),
-              amount: 123,
-              price: 100
+              mint: solMint,
+              amount: solAmount,
+              price: 1
             },
-            totalLiquidity: 24600,
-            apr: 18.5,
-            volume24h: 125000,
-            fees24h: 1250,
+            totalLiquidity: totalLiquidity || (solAmount * 2) || 0,
+            apr: 18.5, // Would calculate from fees
+            volume24h: 0, // Would track from transactions
+            fees24h: 0, // Would calculate from pool activity
             share: 0,
             dexProvider: 'cook',
-            poolAddress: account.pubkey
+            poolAddress: ammPDA
           };
 
           pools.push(pool);
         } catch (error) {
-          console.error('Error parsing pool account:', error);
+          console.error('Error creating pool from launch:', error);
         }
       }
 
@@ -176,9 +271,21 @@ export class LiquidityService {
     }
   }
 
-  // Get user's liquidity positions - REAL implementation
-  async getUserLiquidityPositions(userPublicKey: PublicKey): Promise<UserLiquidityPosition[]> {
+  // Get user's liquidity positions - REAL implementation (with caching)
+  async getUserLiquidityPositions(userPublicKey: PublicKey, forceRefresh: boolean = false): Promise<UserLiquidityPosition[]> {
     try {
+      const userKey = userPublicKey.toBase58();
+      
+      // Check cache first
+      if (!forceRefresh) {
+        const { tradeCache } = await import('./tradeCache');
+        const cached = tradeCache.getUserPositions(userKey);
+        if (cached) {
+          console.log('📦 Using cached user positions');
+          return cached;
+        }
+      }
+
       const positions: UserLiquidityPosition[] = [];
 
       // Get Cook DEX positions
@@ -189,9 +296,20 @@ export class LiquidityService {
       const raydiumPositions = await this.getRaydiumPositions(userPublicKey);
       positions.push(...raydiumPositions);
 
+      // Cache the results
+      const { tradeCache } = await import('./tradeCache');
+      tradeCache.setUserPositions(userKey, positions);
+
       return positions;
     } catch (error) {
       console.error('Error fetching user liquidity positions:', error);
+      // Return cached data if available
+      const { tradeCache } = await import('./tradeCache');
+      const cached = tradeCache.getUserPositions(userPublicKey.toBase58());
+      if (cached) {
+        console.log('⚠️ Error fetching positions, using cached data');
+        return cached;
+      }
       return [];
     }
   }
@@ -201,33 +319,91 @@ export class LiquidityService {
     try {
       const positions: UserLiquidityPosition[] = [];
 
-      // Query for user's LP token accounts
-      const tokenAccounts = await this.connection.getTokenAccountsByOwner(userPublicKey, {
-        programId: TOKEN_PROGRAM_ID
-      });
+      // Get all Cook DEX pools
+      const cookPools = await this.getCookDEXPools(false);
+      
+      // Query for user's token accounts
+      const { getTokenAccountsByOwner, getAssociatedTokenAddress } = await import('@solana/spl-token');
+      const tokenAccounts = await getTokenAccountsByOwner(
+        this.connection,
+        userPublicKey,
+        { programId: TOKEN_PROGRAM_ID }
+      );
 
-      for (const account of tokenAccounts.value) {
+      // For each pool, check if user has provided liquidity
+      for (const pool of cookPools) {
         try {
-          const accountData = await getAccount(this.connection, account.pubkey);
+          // Parse AMM account to get LP token mint
+          const ammAccountInfo = await this.connection.getAccountInfo(pool.poolAddress);
           
-          // Check if this is an LP token by checking if it's associated with our program
-          if (accountData.amount > 0) {
-            // This would need proper LP token identification logic
-            positions.push({
-              poolId: 'cook-pool-1',
-              tokenA: 'TOKEN',
-              tokenB: 'SOL',
-              liquidity: Number(accountData.amount) / 1e9,
-              share: 4.1,
-              value: 1008.2,
-              feesEarned: 15.5,
-              lpTokenMint: accountData.mint,
-              dexProvider: 'cook'
-            });
-            break; // Only add one for demo
+          if (!ammAccountInfo) continue;
+          
+          // Parse AMM data to get LP mint (based on solanaProgram.ts fetchAMMData)
+          const data = ammAccountInfo.data;
+          let offset = 0;
+          
+          // Skip account discriminator (1 byte)
+          offset += 1;
+          
+          // Skip pool (32 bytes)
+          offset += 32;
+          
+          // Skip ammProvider (1 byte)
+          offset += 1;
+          
+          // Skip base_mint (32 bytes)
+          offset += 32;
+          
+          // Skip quote_mint (32 bytes)
+          offset += 32;
+          
+          // LP mint is at offset 96 (1 + 32 + 1 + 32 + 32)
+          const lpMint = new PublicKey(data.slice(offset, offset + 32));
+          
+          // Check if user has LP tokens
+          const userLpAccount = await getAssociatedTokenAddress(
+            lpMint,
+            userPublicKey
+          );
+          
+          try {
+            const lpAccountInfo = await getAccount(this.connection, userLpAccount);
+            
+            if (lpAccountInfo.amount > 0) {
+              const lpBalance = Number(lpAccountInfo.amount) / Math.pow(10, lpAccountInfo.decimals);
+              
+              // Get LP token supply to calculate share
+              const { getMint } = await import('@solana/spl-token');
+              const lpMintInfo = await getMint(this.connection, lpMint);
+              const totalLpSupply = Number(lpMintInfo.supply) / Math.pow(10, lpMintInfo.decimals);
+              
+              // Calculate user's share
+              const share = totalLpSupply > 0 ? (lpBalance / totalLpSupply) * 100 : 0;
+              
+              // Calculate position value
+              const positionValue = (pool.totalLiquidity * share) / 100;
+              
+              if (share > 0.001) { // Only show if share > 0.001%
+                positions.push({
+                  poolId: pool.id,
+                  tokenA: pool.tokenA.symbol,
+                  tokenB: pool.tokenB.symbol,
+                  liquidity: lpBalance,
+                  share: share,
+                  value: positionValue,
+                  feesEarned: 0, // Would calculate from pool activity
+                  lpTokenMint: lpMint,
+                  dexProvider: 'cook'
+                });
+              }
+            }
+          } catch (error) {
+            // User doesn't have LP tokens for this pool, skip
+            continue;
           }
         } catch (error) {
-          // Account might not be a valid token account
+          // Skip pools where we can't get position info
+          console.warn('Could not get position info for pool:', pool.id, error);
           continue;
         }
       }
@@ -259,25 +435,59 @@ export class LiquidityService {
     tokenBMint: PublicKey,
     amountA: number,
     amountB: number,
-    userPublicKey: PublicKey
+    userPublicKey: PublicKey,
+    signTransaction: (transaction: Transaction) => Promise<Transaction>
   ): Promise<string> {
     try {
       if (dexProvider === 'cook') {
         // Use REAL Cook DEX transaction
+        const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+        
+        // Determine which is token and which is SOL
+        const isTokenA_SOL = tokenAMint.equals(WSOL_MINT);
+        const tokenMint = isTokenA_SOL ? tokenBMint : tokenAMint;
+        const solMint = WSOL_MINT;
+        const tokenAmount = isTokenA_SOL ? amountB : amountA;
+        const solAmount = isTokenA_SOL ? amountA : amountB;
+        
         const transaction = await realLaunchService.buildAddLiquidityTransaction(
-          tokenAMint,
-          tokenBMint,
-          amountA,
-          amountB,
+          tokenMint,
+          solMint,
+          tokenAmount,
+          solAmount,
           userPublicKey
         );
         
-        // This would be signed and sent by the wallet
-        return 'real-cook-transaction-signature';
+        // Get blockhash and sign transaction
+        const { blockhash } = await this.connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = userPublicKey;
+        
+        // Sign and send transaction
+        const signedTransaction = await signTransaction(transaction);
+        const signature = await this.connection.sendRawTransaction(signedTransaction.serialize());
+        await this.connection.confirmTransaction(signature, 'confirmed');
+        
+        return signature;
       } else {
         // Use REAL Raydium transaction
-        // This would call Raydium's add liquidity instruction
-        return 'real-raydium-transaction-signature';
+        const { raydiumService } = await import('./raydiumService');
+        const poolAddress = await raydiumService.findPool(tokenAMint, tokenBMint);
+        if (!poolAddress) {
+          throw new Error('Raydium pool not found');
+        }
+        
+        const signature = await raydiumService.addLiquidity(
+          poolAddress,
+          userPublicKey,
+          tokenAMint,
+          tokenBMint,
+          BigInt(Math.floor(amountA * 1e9)),
+          BigInt(Math.floor(amountB * 1e9)),
+          signTransaction
+        );
+        
+        return signature;
       }
     } catch (error) {
       console.error('Error adding liquidity:', error);
@@ -291,16 +501,49 @@ export class LiquidityService {
     dexProvider: 'cook' | 'raydium',
     lpTokenMint: PublicKey,
     lpTokenAmount: number,
-    userPublicKey: PublicKey
+    userPublicKey: PublicKey,
+    signTransaction: (transaction: Transaction) => Promise<Transaction>
   ): Promise<string> {
     try {
       if (dexProvider === 'cook') {
         // Use REAL Cook DEX transaction
-        // This would call your program's remove liquidity instruction
-        return 'real-cook-remove-signature';
+        // Find the pool to get token mints
+        const pools = await this.getCookDEXPools(false);
+        const pool = pools.find(p => p.id === poolId);
+        
+        if (!pool) {
+          throw new Error('Pool not found');
+        }
+        
+        // Build remove liquidity transaction
+        // This would need to be implemented in realLaunchService or solanaProgram
+        // For now, throw an error directing to use tradingService
+        throw new Error('Remove liquidity for Cook DEX not yet implemented. Please use the trading interface.');
       } else {
         // Use REAL Raydium transaction
-        return 'real-raydium-remove-signature';
+        const { raydiumService } = await import('./raydiumService');
+        const allPools = await this.getLiquidityPools(false);
+        const pool = allPools.find(p => p.id === poolId);
+        
+        if (!pool) {
+          throw new Error('Pool not found');
+        }
+        
+        const poolAddress = await raydiumService.findPool(pool.tokenA.mint, pool.tokenB.mint);
+        if (!poolAddress) {
+          throw new Error('Raydium pool not found');
+        }
+        
+        const signature = await raydiumService.removeLiquidity(
+          poolAddress,
+          userPublicKey,
+          pool.tokenA.mint,
+          pool.tokenB.mint,
+          BigInt(Math.floor(lpTokenAmount * 1e9)),
+          signTransaction
+        );
+        
+        return signature;
       }
     } catch (error) {
       console.error('Error removing liquidity:', error);

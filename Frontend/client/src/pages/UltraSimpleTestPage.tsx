@@ -176,7 +176,7 @@ export default function UltraSimpleTestPage() {
               <div className="flex items-center justify-between">
                 <span>Program ID:</span>
                 <code className="text-sm bg-muted px-2 py-1 rounded">
-                ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ
+                J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg
                 </code>
               </div>
               

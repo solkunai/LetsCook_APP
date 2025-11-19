@@ -1,6 +1,6 @@
 use borsh::{to_vec, BorshDeserialize, BorshSerialize};
 
-use crate::hybrid::CollectionData;
+// use crate::hybrid::CollectionData; // Disabled - NFT functionality removed, using Token-2022 only
 use crate::instruction::accounts::InitAccounts;
 use crate::instruction::{SetNameArgs, VoteArgs};
 use crate::{accounts, launch};
@@ -95,27 +95,9 @@ pub fn hype_vote<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], args:
     }
 
     if args.launch_type == 1 {
-        let mut launch_data: CollectionData = CollectionData::try_from_slice(&launch_data_account_info.data.borrow()[..])?;
-
-        let _launch_bump_seed = accounts::check_program_data_account(
-            launch_data_account_info,
-            program_id,
-            vec![launch_data.page_name.as_bytes(), b"Collection"],
-        )
-        .unwrap();
-
-        if args.vote == 1 {
-            launch_data.positive_votes += 1;
-        } else if args.vote == 2 {
-            launch_data.negative_votes += 1
-        } else {
-            msg!("invalid vote value");
-            return Err(ProgramError::InvalidAccountData);
-        }
-
-        launch_id = launch_data.launch_id;
-
-        launch_data.serialize(&mut &mut launch_data_account_info.data.borrow_mut()[..])?;
+        // NFT collection voting disabled - using Token-2022 only
+        msg!("⚠️ NFT collection voting not supported - only Token-2022 token launches are supported");
+        return Err(ProgramError::InvalidAccountData);
     }
 
     accounts::check_system_program_key(system_program_account_info)?;

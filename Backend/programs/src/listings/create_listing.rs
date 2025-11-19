@@ -49,7 +49,7 @@ pub fn create_listing<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], 
 
     // Handle any other checks
 
-    if ctx.accounts.listing.is_none() {
+    if **ctx.accounts.unverified.try_borrow_lamports()? == 0 {
         msg!("Rejecting listing");
         let account_lamports = **ctx.accounts.unverified.try_borrow_lamports()?;
         **ctx.accounts.unverified.try_borrow_mut_lamports()? -= account_lamports;
@@ -57,7 +57,7 @@ pub fn create_listing<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], 
         return Ok(());
     }
 
-    let listing_account = ctx.accounts.listing.unwrap();
+    let listing_account = ctx.accounts.listing;
 
     let listing_bump_seed = accounts::check_program_data_account(
         listing_account,
@@ -103,14 +103,14 @@ pub fn create_listing<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], 
     creator_data.serialize(&mut &mut ctx.accounts.creator_data.data.borrow_mut()[..])?;
 
     // check if we should make the amm
-    if ctx.accounts.amm.is_some() {
+    if **ctx.accounts.amm.try_borrow_lamports()? > 0 {
         msg!("have AMM");
         let mut amm_seed_keys: Vec<Pubkey> = Vec::new();
-        amm::get_amm_seeds(*ctx.accounts.base_token_mint.key, *ctx.accounts.quote_mint.key, &mut amm_seed_keys);
+        amm::get_amm_seeds(*ctx.accounts.base_token_mint.key, *ctx.accounts.quote_token_mint.key, &mut amm_seed_keys);
 
         let provider_bytes: &[u8] = if args.provider == 1 { b"RaydiumCPMM" } else { b"Raydium" };
         let amm_bump_seed = accounts::check_program_data_account(
-            ctx.accounts.amm.unwrap(),
+            ctx.accounts.amm,
             program_id,
             vec![&amm_seed_keys[0].to_bytes(), &amm_seed_keys[1].to_bytes(), provider_bytes],
         )
@@ -118,30 +118,25 @@ pub fn create_listing<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], 
 
         amm::create_amm(
             ctx.accounts.user,
-            ctx.accounts.amm_pool.unwrap(),
-            ctx.accounts.amm.unwrap(),
+            ctx.accounts.amm_pool,
+            ctx.accounts.amm,
             ctx.accounts.amm_quote,
-            ctx.accounts.quote_mint,
+            ctx.accounts.quote_token_mint,
             ctx.accounts.amm_base,
             ctx.accounts.base_token_mint,
             ctx.accounts.lp_token_mint,
-            ctx.accounts.amm_base,
-            ctx.accounts.amm_base,
+            ctx.accounts.quote_token_program,
+            ctx.accounts.base_token_program,
             program_id,
-            amm_bump_seed,
-            25,
             args.provider,
-            0,
             ctx.accounts.amm_base,
             0,
-            false,
         )?;
 
         // set start time
         let clock = Clock::get()?;
-        let mut amm_data = AMM::try_from_slice(&ctx.accounts.amm.unwrap().data.borrow()[..])?;
-        amm_data.start_time = clock.unix_timestamp as u64;
-        amm_data.serialize(&mut &mut ctx.accounts.amm.unwrap().data.borrow_mut()[..])?;
+        let mut amm_data = AMM::try_from_slice(&ctx.accounts.amm.data.borrow()[..])?;
+        amm_data.serialize(&mut &mut ctx.accounts.amm.data.borrow_mut()[..])?;
     }
 
     let account_lamports = **ctx.accounts.unverified.try_borrow_lamports()?;

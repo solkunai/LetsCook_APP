@@ -49,12 +49,12 @@ export function Header() {
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2 hover-lift">
             <span className="sr-only">Let's Cook</span>
-            <span className="relative flex h-10 w-10">
+            <span className="relative flex h-14 w-14 md:h-16 md:w-16 lg:h-20 lg:w-20">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-20"></span>
               <img
                 src="/logo.svg"
                 alt="Let's Cook Logo"
-                className="relative h-10 w-10"
+                className="relative h-14 w-14 md:h-16 md:w-16 lg:h-20 lg:w-20"
               />
             </span>
             <span className="text-xl font-bold text-gradient hidden sm:inline-block">

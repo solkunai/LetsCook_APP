@@ -256,7 +256,7 @@ This shows the instruction is properly serialized for your native program.`);
           <div className="bg-white/5 rounded-xl p-6 mb-6">
             <h2 className="text-xl font-semibold text-white mb-4">Program Info</h2>
             <div className="text-white/80 space-y-2">
-              <p><strong>Program ID:</strong> ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ</p>
+              <p><strong>Program ID:</strong> J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg</p>
               <p><strong>Network:</strong> Devnet</p>
               <p><strong>Wallet:</strong> {connected ? publicKey?.toString() : 'Not connected'}</p>
             </div>

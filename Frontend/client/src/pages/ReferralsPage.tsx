@@ -35,11 +35,11 @@ export default function ReferralsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isClaiming, setIsClaiming] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [referralCodeInput, setReferralCodeInput] = useState('');
 
-  // Load data on component mount
+  // Load leaderboard on mount
   useEffect(() => {
-    loadReferralData();
     loadLeaderboard();
   }, []);
 
@@ -50,21 +50,11 @@ export default function ReferralsPage() {
     }
   }, [connected, publicKey]);
 
-  const loadReferralData = async () => {
-    setIsLoading(true);
-    try {
-      // Load general referral information
-      setIsLoading(false);
-    } catch (error) {
-      console.error('Error loading referral data:', error);
-      setIsLoading(false);
-    }
-  };
-
   const loadUserReferralData = async () => {
     if (!publicKey) return;
     
     try {
+      setIsLoading(true);
       const [data, rewards] = await Promise.all([
         referralService.getReferralData(publicKey),
         referralService.getReferralRewards(publicKey)
@@ -79,6 +69,8 @@ export default function ReferralsPage() {
         description: "Failed to load referral data. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -105,6 +97,23 @@ export default function ReferralsPage() {
       setTimeout(() => setCopiedCode(false), 2000);
     } catch (error) {
       console.error('Error copying referral code:', error);
+    }
+  };
+
+  const copyReferralLink = async () => {
+    if (!referralData) return;
+    const baseUrl = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    const link = `${baseUrl}?ref=${referralData.referralCode}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedLink(true);
+      toast({
+        title: "Copied!",
+        description: "Referral link copied to clipboard.",
+      });
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (error) {
+      console.error('Error copying referral link:', error);
     }
   };
 
@@ -303,8 +312,8 @@ export default function ReferralsPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="flex items-center gap-4">
-                      <div className="flex-1">
+                    <div className="space-y-4">
+                      <div>
                         <Label htmlFor="referral-code">Referral Code</Label>
                         <div className="flex gap-2">
                           <Input
@@ -326,10 +335,29 @@ export default function ReferralsPage() {
                           </Button>
                         </div>
                       </div>
-                      <Button onClick={shareReferralLink}>
-                        <Share2 className="w-4 h-4 mr-2" />
-                        Share
-                      </Button>
+
+                      <div>
+                        <Label htmlFor="referral-link">Referral Link</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="referral-link"
+                            value={`${((import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : ''))}?ref=${referralData.referralCode}`}
+                            readOnly
+                            className="font-mono"
+                          />
+                          <Button
+                            variant="outline"
+                            onClick={copyReferralLink}
+                            disabled={copiedLink}
+                          >
+                            {copiedLink ? (
+                              <CheckCircle className="w-4 h-4" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="bg-muted/50 rounded-lg p-4">

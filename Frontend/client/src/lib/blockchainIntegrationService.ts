@@ -30,8 +30,16 @@ export interface BlockchainLaunchData {
   ticketsSold: number;
   ticketsClaimed: number;
   mintsWon: number;
+  numMints: number; // Maximum number of tickets (0 means unlimited)
   baseTokenMint: string; // SPL token mint address
   quoteTokenMint: string; // Quote token mint (usually SOL)
+  tokensSold?: number; // Tokens sold for instant launches
+  isGraduated?: boolean; // Whether instant launch has graduated to AMM
+  graduationThreshold?: number; // Graduation threshold in lamports
+  dexProvider?: 'cook' | 'raydium'; // DEX provider for liquidity pool
+  poolAddress?: string; // Liquidity pool address
+  isLiquidityLocked?: boolean; // Whether LP tokens are locked
+  lockUnlockDate?: Date; // LP token unlock date
   rawMetadata?: {
     tokenName: string | null;
     tokenSymbol: string | null;
@@ -156,7 +164,7 @@ export class BlockchainIntegrationService {
   constructor() {
     this.connection = getSimpleConnection();
     // Use your actual deployed program ID
-    this.programId = new PublicKey("ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+    this.programId = new PublicKey("J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
     
     this.loadFromPersistentCache();
   }
@@ -220,22 +228,41 @@ export class BlockchainIntegrationService {
 
   /**
    * Fetch all launches from the blockchain with persistent caching
+   * @param forceRefresh - If true, bypasses cache and fetches fresh data
    */
-  async getAllLaunches(): Promise<BlockchainLaunchData[]> {
-    // Check if we have valid cached data (5 minutes)
+  async getAllLaunches(forceRefresh: boolean = false): Promise<BlockchainLaunchData[]> {
+    // Check if we have valid cached data (5 minutes) - unless force refresh
     const now = Date.now();
-    if (this.cache.size > 0 && (now - this.cacheTimestamp) < this.CACHE_DURATION) {
+    if (!forceRefresh && this.cache.size > 0 && (now - this.cacheTimestamp) < this.CACHE_DURATION) {
+      console.log(`📦 Using cached data (${this.cache.size} launches, ${Math.round((now - this.cacheTimestamp) / 1000)}s old)`);
       return Array.from(this.cache.values());
     }
 
     try {
       console.log('🔄 Fetching fresh launch data from blockchain...');
+      console.log('📍 Program ID:', this.programId.toBase58());
+      console.log('🌐 Connection endpoint:', this.connection.rpcEndpoint);
       
       // Single API call to get all accounts at once
-      const allAccounts = await this.connection.getProgramAccounts(this.programId);
+      const allAccounts = await this.connection.getProgramAccounts(this.programId, {
+        commitment: 'confirmed',
+        filters: [] // Get all accounts owned by the program
+      });
+      
+      console.log('📊 Found', allAccounts.length, 'total accounts for program', this.programId.toBase58());
       
       if (allAccounts.length === 0) {
-        console.log('❌ No accounts found for this program ID');
+        console.warn('⚠️ No accounts found for this program ID. Possible issues:');
+        console.warn('  1. Program ID might be incorrect');
+        console.warn('  2. No launches have been created yet');
+        console.warn('  3. Connection might be to wrong network (devnet vs mainnet)');
+        
+        // Try to return cached data if available, even if expired
+        if (this.cache.size > 0) {
+          console.log('📦 Returning stale cache as fallback...');
+          return Array.from(this.cache.values());
+        }
+        
         return [];
       }
       
@@ -244,18 +271,23 @@ export class BlockchainIntegrationService {
       // Parse all accounts in one go (no individual API calls)
       const launches: BlockchainLaunchData[] = [];
       let initializedCount = 0;
+      let skippedZeros = 0;
+      let skippedInvalid = 0;
       
       for (const { pubkey, account } of allAccounts) {
         // Skip uninitialized accounts (all zeros)
         const isAllZeros = account.data.every(byte => byte === 0);
         if (isAllZeros) {
+          skippedZeros++;
           continue;
         }
         
         initializedCount++;
         
-        // Debug: Log each account being processed
-        console.log(`🔍 Processing account: ${pubkey.toBase58()}, data length: ${account.data.length}, first byte: ${account.data[0]}`);
+        // Debug: Log each account being processed (only first 5 to avoid spam)
+        if (initializedCount <= 5) {
+          console.log(`🔍 Processing account ${initializedCount}: ${pubkey.toBase58()}, data length: ${account.data.length}, first byte: ${account.data[0]}`);
+        }
         
         try {
           // Parse without making additional API calls
@@ -265,10 +297,16 @@ export class BlockchainIntegrationService {
             launches.push(launchData);
             this.cache.set(launchData.id, launchData);
           } else {
-            console.log(`⚠️ Account ${pubkey.toBase58()} returned null from parser`);
+            skippedInvalid++;
+            if (skippedInvalid <= 3) {
+              console.log(`⚠️ Account ${pubkey.toBase58()} returned null from parser (not a launch account)`);
+            }
           }
         } catch (error) {
-          console.error('❌ Error parsing account:', pubkey.toBase58(), error);
+          skippedInvalid++;
+          if (skippedInvalid <= 3) {
+            console.error('❌ Error parsing account:', pubkey.toBase58(), error);
+          }
         }
       }
       
@@ -277,9 +315,23 @@ export class BlockchainIntegrationService {
       this.saveToPersistentCache(launches);
       
       console.log('✅ Parsed', launches.length, 'launches from', initializedCount, 'initialized accounts');
+      console.log(`   Skipped: ${skippedZeros} zero accounts, ${skippedInvalid} invalid accounts`);
+      
+      if (launches.length === 0 && initializedCount > 0) {
+        console.warn('⚠️ No valid launches found despite', initializedCount, 'initialized accounts');
+        console.warn('   This might indicate a parsing issue or account structure mismatch');
+      }
+      
       return launches;
     } catch (error) {
       console.error('❌ Error fetching launches:', error);
+      
+      // Try to return cached data if available, even if expired
+      if (this.cache.size > 0) {
+        console.log('📦 Returning stale cache as fallback due to error...');
+        return Array.from(this.cache.values());
+      }
+      
       return [];
     }
   }
@@ -340,6 +392,14 @@ export class BlockchainIntegrationService {
           if (!canRead(4)) throw new Error(`Cannot read string length at offset ${offset}, buffer length: ${data.length}`);
           const length = data.readUInt32LE(offset);
           offset += 4;
+          
+          // Validate string length - if it's too large, the account is likely corrupted
+          // Max reasonable string length is buffer size minus current offset (with some buffer)
+          const maxReasonableLength = Math.min(data.length - offset, 10000); // Max 10KB string
+          if (length > maxReasonableLength) {
+            throw new Error(`Invalid string length ${length} at offset ${offset - 4} (buffer length: ${data.length}, max reasonable: ${maxReasonableLength}). Account may be corrupted or uninitialized.`);
+          }
+          
           if (!canRead(length)) throw new Error(`Cannot read string of length ${length} at offset ${offset}, buffer length: ${data.length}`);
           const value = data.slice(offset, offset + length).toString('utf8');
           offset += length;
@@ -350,6 +410,22 @@ export class BlockchainIntegrationService {
           const value = data.slice(offset, offset + length);
           offset += length;
           return value;
+        },
+        i64: (): bigint => {
+          if (!canRead(8)) throw new Error(`Cannot read i64 at offset ${offset}, buffer length: ${data.length}`);
+          const value = data.readBigInt64LE(offset);
+          offset += 8;
+          return value;
+        },
+        pubkey: (): PublicKey => {
+          if (!canRead(32)) throw new Error(`Cannot read Pubkey at offset ${offset}, buffer length: ${data.length}`);
+          const value = new PublicKey(data.slice(offset, offset + 32));
+          offset += 32;
+          return value;
+        },
+        bool: (): boolean => {
+          // Borsh serializes bool as u8 (0 = false, 1 = true)
+          return safeRead.u8() !== 0;
         }
       };
       
@@ -359,15 +435,32 @@ export class BlockchainIntegrationService {
       // Read account_type (u8) - already read above
       offset += 1;
       
-      // Read launch_meta (u8)
-      const launchMeta = safeRead.u8();
+      // Read launch_meta enum (LaunchMeta)
+      // Enum format: discriminator (u8) + variant data
+      const launchMetaDiscriminator = safeRead.u8();
+      // 0 = Raffle (empty), 1 = FCFS (empty), 2 = IDO (has f64 + u64)
+      if (launchMetaDiscriminator === 2) { // IDO variant
+        safeRead.bytes(8); // f64: token_fraction_distributed
+        safeRead.bytes(8); // u64: tokens_distributed
+      }
+      const launchMeta = launchMetaDiscriminator;
       
-      // Read plugins Vec<u8>
+      // Read plugins Vec<LaunchPlugin> (vector of enums)
       const pluginsLength = safeRead.u32();
-      const plugins = Array.from(safeRead.bytes(pluginsLength));
+      const plugins = [];
+      for (let i = 0; i < pluginsLength; i++) {
+        const pluginDiscriminator = safeRead.u8();
+        // 0 = WhiteListToken(key: Pubkey, quantity: u64, phase_end: u64)
+        if (pluginDiscriminator === 0) { // WhiteListToken
+          safeRead.bytes(32); // key: Pubkey
+          safeRead.bytes(8);  // quantity: u64
+          safeRead.bytes(8);  // phase_end: u64
+        }
+        plugins.push(pluginDiscriminator);
+      }
       
-      // Read last_interaction (u64)
-      const lastInteraction = safeRead.u64();
+      // Read last_interaction (i64, not u64!)
+      const lastInteraction = safeRead.i64();
       
       // Read num_interactions (u16)
       const numInteractions = safeRead.u16();
@@ -375,8 +468,9 @@ export class BlockchainIntegrationService {
       // Read page_name String
       const pageName = safeRead.string();
       
-      // Read listing String
-      const listing = safeRead.string();
+      // Read listing Pubkey (32 bytes, not String)
+      const listingPubkey = safeRead.pubkey();
+      const listing = listingPubkey.toBase58();
       
       // Read total_supply (u64)
       const totalSupply = safeRead.u64();
@@ -411,15 +505,12 @@ export class BlockchainIntegrationService {
       // Read buffer2 (u64)
       const buffer2 = safeRead.u64();
       
-      // Read buffer3 (u64)
-      const buffer3 = safeRead.u64();
+      // Read buffer3 (u32, not u64!)
+      const buffer3 = safeRead.u32();
       
-      // Read distribution Vec<u64>
+      // Read distribution Vec<u8> (not Vec<u64>!)
       const distributionLength = safeRead.u32();
-      const distribution = [];
-      for (let i = 0; i < distributionLength; i++) {
-        distribution.push(safeRead.u64());
-      }
+      const distribution = Array.from(safeRead.bytes(distributionLength));
       
       // Read flags Vec<u8>
       const flagsLength = safeRead.u32();
@@ -432,40 +523,84 @@ export class BlockchainIntegrationService {
         strings.push(safeRead.string());
       }
       
-      // Read keys Vec<String>
+      // Read keys Vec<Pubkey> (not Vec<String>!)
       const keysLength = safeRead.u32();
       const keys = [];
       for (let i = 0; i < keysLength; i++) {
-        keys.push(safeRead.string());
+        keys.push(safeRead.pubkey().toBase58());
       }
       
-      // Extract actual SPL token mint from keys array (without API calls)
+      // Read is_tradable (bool)
+      const isTradable = safeRead.bool();
+      
+      // Read tokens_sold (u64)
+      const tokensSold = safeRead.u64();
+      
+      // Read is_graduated (bool)
+      const isGraduated = safeRead.bool();
+      
+      // Read graduation_threshold (u64)
+      const graduationThreshold = safeRead.u64();
+      
+      // Extract actual SPL token mint from keys array
+      // For instant launches: keys[2] (WSOLAddress slot) contains base_token_mint
+      // keys[0] = Seller (creator)
+      // keys[1] = TeamWallet
+      // keys[2] = WSOLAddress (for instant launches, this is base_token_mint)
       let actualTokenMint = '';
-      for (const key of keys) {
-        // Simple validation without API calls
-        if (key.length === 44 && !key.includes('bafkrei') && !key.includes('Qm')) {
+      
+      // Priority 1: For instant launches, token mint is stored in keys[2] (WSOLAddress slot)
+      // We need to verify it's actually a token mint, not just a valid PublicKey
+      if (keys.length > 2 && keys[2]) {
+        const tokenMintKey = keys[2];
+        // Validate it's a valid PublicKey format and not an IPFS hash
+        if (tokenMintKey.length === 44 && !tokenMintKey.includes('bafkrei') && !tokenMintKey.includes('Qm')) {
           try {
-            new PublicKey(key); // Just validate format
-            actualTokenMint = key;
-            break; // Use the first valid-looking key
+            const publicKey = new PublicKey(tokenMintKey);
+            // Skip if it's the WSOL address (that would be the quote token, not base token)
+            if (tokenMintKey !== 'So11111111111111111111111111111111111111112') {
+              // For synchronous parsing, we can't verify owner, but we can check format
+              // The backend stores base_token_mint in keys[2] for instant launches
+              actualTokenMint = tokenMintKey;
+            }
           } catch (e) {
-            continue;
+            // Not a valid PublicKey, skip
           }
         }
       }
       
-      // Read creator Pubkey (32 bytes)
-      const creatorBytes = Array.from(safeRead.bytes(32));
-      const creatorPubkey = new PublicKey(creatorBytes);
+      // Priority 2: Search all keys for valid token mints (fallback for older launches or different structures)
+      if (!actualTokenMint) {
+        for (const key of keys) {
+          if (key.length === 44 && !key.includes('bafkrei') && !key.includes('Qm')) {
+            try {
+              const publicKey = new PublicKey(key);
+              // Skip WSOL address if it's found here
+              if (publicKey.toBase58() === 'So11111111111111111111111111111111111111112') {
+                continue;
+              }
+              // For synchronous parsing, we can't make RPC calls to verify owner.
+              // We'll assume the first valid-looking PublicKey that isn't WSOL is the token mint.
+              actualTokenMint = publicKey.toBase58();
+              break;
+            } catch (e) {
+              continue;
+            }
+          }
+        }
+      }
       
-      // Read upvotes (u32)
-      const upvotes = safeRead.u32();
+      // Final fallback: use listing account (derived from token mint)
+      if (!actualTokenMint) {
+        console.warn('⚠️ No token mint found in keys array, using listing as fallback');
+        actualTokenMint = listing; // listing Pubkey (derived from token mint)
+      }
       
-      // Read downvotes (u32)
-      const downvotes = safeRead.u32();
-      
-      // Read is_tradable (u8)
-      const isTradable = safeRead.u8();
+      // Extract creator from keys array
+      // keys[0] = Seller (creator)
+      const creatorPubkey = keys.length > 0 ? new PublicKey(keys[0]) : PublicKey.default;
+      const upvotes = 0; // No longer in struct
+      const downvotes = 0; // No longer in struct
       
       // Extract token metadata from strings array
       const tokenName = strings[0] && strings[0].length > 0 ? strings[0].trim() : null;
@@ -474,28 +609,23 @@ export class BlockchainIntegrationService {
       const tokenIcon = strings[3] && strings[3].length > 0 ? strings[3].trim() : null;
       const tokenBanner = strings[4] && strings[4].length > 0 ? strings[4].trim() : null;
       
-      // Determine launch type
+      // Determine launch type from launchMeta enum discriminator
+      // LaunchMeta::Raffle = 0, LaunchMeta::FCFS = 1 (used for instant), LaunchMeta::IDO = 2
       let launchType: 'instant' | 'raffle' | 'ido';
-      if (strings.length > 6 && strings[6]) {
+      // Primary: Use launchMeta discriminator (most reliable)
+      switch (launchMeta) {
+        case 0: launchType = 'raffle'; break;   // LaunchMeta::Raffle
+        case 1: launchType = 'instant'; break;  // LaunchMeta::FCFS (used for instant launches)
+        case 2: launchType = 'ido'; break;     // LaunchMeta::IDO
+        default: launchType = 'raffle';
+      }
+      
+      // Fallback: Check strings array if launchMeta is unclear
+      if (launchType === 'raffle' && strings.length > 6 && strings[6]) {
         switch (strings[6]) {
           case 'raffle': launchType = 'raffle'; break;
           case 'instant': launchType = 'instant'; break;
           case 'ido': launchType = 'ido'; break;
-          default: launchType = 'raffle';
-        }
-      } else if (flags.length > 0) {
-        switch (flags[0]) {
-          case 0: launchType = 'raffle'; break;
-          case 1: launchType = 'instant'; break;
-          case 2: launchType = 'ido'; break;
-          default: launchType = 'raffle';
-        }
-      } else {
-        switch (launchMeta) {
-          case 0: launchType = 'raffle'; break;
-          case 1: launchType = 'instant'; break;
-          case 2: launchType = 'ido'; break;
-          default: launchType = 'raffle';
         }
       }
       
@@ -536,16 +666,21 @@ export class BlockchainIntegrationService {
       const displayIcon = convertIPFSUrl(tokenIcon);
       const displayBanner = convertIPFSUrl(tokenBanner);
       
+      // Note: Sync parser doesn't fetch IPFS metadata (would block)
+      // Metadata fetching happens in async parser and LaunchDetailPage
       // Use actual token metadata if available
       const displayName = tokenName || pageName || accountPubkey.toBase58().slice(0, 8);
       const displaySymbol = tokenSymbol || pageName.toUpperCase().slice(0, 4) || 'TOKEN';
       
+      // Use icon from blockchain data (metadata image will be fetched async in LaunchDetailPage)
+      const finalImage = displayIcon || '';
+      
       return {
-        id: accountPubkey.toBase58(),
+        id: accountPubkey.toBase58(), // Launch data PDA address (correct!)
         name: displayName,
         symbol: displaySymbol,
         description: tokenUri ? `Token metadata: ${tokenUri}` : `Launch for ${displayName}`,
-        image: displayIcon || '',
+        image: finalImage, // Use image from metadata URI if available, otherwise use icon
         banner: displayBanner || undefined,
         metadataUri: tokenUri || undefined,
         launchType,
@@ -555,18 +690,22 @@ export class BlockchainIntegrationService {
         ticketPrice: Number(ticketPrice) / 1e9,
         launchDate: new Date(launchDateMs),
         endDate: new Date(endDateMs),
-        creator: creatorPubkey.toBase58(),
-        isTradable: isTradable === 1,
+        creator: creatorPubkey.toBase58(), // Creator wallet (from keys array)
+        isTradable,
         upvotes,
         downvotes,
+        tokensSold: Number(tokensSold),
+        isGraduated,
+        graduationThreshold: Number(graduationThreshold),
         participants: upvotes + downvotes,
         programId: this.programId.toBase58(),
-        accountAddress: accountPubkey.toBase58(),
+        accountAddress: accountPubkey.toBase58(), // Launch data PDA (this is correct!)
         pageName: pageName,
         ticketsSold,
         ticketsClaimed: ticketClaimed,
         mintsWon,
-        baseTokenMint: actualTokenMint || accountPubkey.toBase58(),
+        numMints: Number(numMints), // Maximum tickets (0 = unlimited)
+        baseTokenMint: actualTokenMint || listing, // Use actual SPL token mint or fallback to listing (derived from token mint), NOT accountPubkey
         quoteTokenMint: 'So11111111111111111111111111111111111111112', // SOL
         rawMetadata: {
           tokenName, tokenSymbol, tokenUri, tokenIcon, tokenBanner, strings, keys
@@ -631,10 +770,30 @@ export class BlockchainIntegrationService {
           offset += 8;
           return value;
         },
+        i64: (): bigint => {
+          if (!canRead(8)) throw new Error(`Cannot read i64 at offset ${offset}, buffer length: ${data.length}`);
+          const value = data.readBigInt64LE(offset);
+          offset += 8;
+          return value;
+        },
+        pubkey: (): PublicKey => {
+          if (!canRead(32)) throw new Error(`Cannot read Pubkey at offset ${offset}, buffer length: ${data.length}`);
+          const value = new PublicKey(data.slice(offset, offset + 32));
+          offset += 32;
+          return value;
+        },
         string: (): string => {
           if (!canRead(4)) throw new Error(`Cannot read string length at offset ${offset}, buffer length: ${data.length}`);
           const length = data.readUInt32LE(offset);
           offset += 4;
+          
+          // Validate string length - if it's too large, the account is likely corrupted
+          // Max reasonable string length is buffer size minus current offset (with some buffer)
+          const maxReasonableLength = Math.min(data.length - offset, 10000); // Max 10KB string
+          if (length > maxReasonableLength) {
+            throw new Error(`Invalid string length ${length} at offset ${offset - 4} (buffer length: ${data.length}, max reasonable: ${maxReasonableLength}). Account may be corrupted or uninitialized.`);
+          }
+          
           if (!canRead(length)) throw new Error(`Cannot read string of length ${length} at offset ${offset}, buffer length: ${data.length}`);
           const value = data.slice(offset, offset + length).toString('utf8');
           offset += length;
@@ -645,24 +804,50 @@ export class BlockchainIntegrationService {
           const value = data.slice(offset, offset + length);
           offset += length;
           return value;
+        },
+        bool: (): boolean => {
+          // Borsh serializes bool as u8 (0 = false, 1 = true)
+          return safeRead.u8() !== 0;
         }
       };
       
       // Manual parsing instead of Borsh due to enum complexity
       let offset = 0;
       
-      // Read account_type (u8) - already read above
-      offset += 1;
+      // Read account_type (u8)
+      const accountTypeRead = safeRead.u8();
       
-      // Read launch_meta (u8) - but this might be more complex due to enum variants
-      const launchMeta = safeRead.u8();
+      // Read launch_meta enum: u8 discriminator + variant data
+      // LaunchMeta::Raffle = 0 (empty struct)
+      // LaunchMeta::FCFS = 1 (empty struct)  
+      // LaunchMeta::IDO = 2 (f64 + u64)
+      const launchMetaDiscriminator = safeRead.u8();
+      if (launchMetaDiscriminator === 2) {
+        // IDO variant: read f64 + u64
+        safeRead.bytes(8); // f64: token_fraction_distributed
+        safeRead.bytes(8); // u64: tokens_distributed
+      }
+      // For Raffle (0) and FCFS (1), no additional data (empty structs)
+      const launchMeta = launchMetaDiscriminator;
       
-      // Read plugins Vec<u8>
+      // Read plugins Vec<LaunchPlugin> (not Vec<u8>)
+      // LaunchPlugin is an enum: WhiteListToken(WhiteListToken)
+      // Each plugin: u8 discriminator + struct data
       const pluginsLength = safeRead.u32();
-      const plugins = Array.from(safeRead.bytes(pluginsLength));
+      const plugins = [];
+      for (let i = 0; i < pluginsLength; i++) {
+        const pluginDiscriminator = safeRead.u8();
+        if (pluginDiscriminator === 0) {
+          // WhiteListToken: Pubkey (32) + u64 + u64
+          safeRead.bytes(32); // key: Pubkey
+          safeRead.bytes(8);  // quantity: u64
+          safeRead.bytes(8);  // phase_end: u64
+        }
+        plugins.push(pluginDiscriminator);
+      }
       
-      // Read last_interaction (u64)
-      const lastInteraction = safeRead.u64();
+      // Read last_interaction (i64) - signed 64-bit integer
+      const lastInteraction = safeRead.i64();
       
       // Read num_interactions (u16)
       const numInteractions = safeRead.u16();
@@ -670,8 +855,9 @@ export class BlockchainIntegrationService {
       // Read page_name String
       const pageName = safeRead.string();
       
-      // Read listing String
-      const listing = safeRead.string();
+      // Read listing Pubkey (32 bytes, not String)
+      const listingPubkey = safeRead.pubkey();
+      const listing = listingPubkey.toBase58();
       
       // Read total_supply (u64)
       const totalSupply = safeRead.u64();
@@ -706,15 +892,12 @@ export class BlockchainIntegrationService {
       // Read buffer2 (u64)
       const buffer2 = safeRead.u64();
       
-      // Read buffer3 (u64)
-      const buffer3 = safeRead.u64();
+      // Read buffer3 (u32) - not u64!
+      const buffer3 = safeRead.u32();
       
-      // Read distribution Vec<u64>
+      // Read distribution Vec<u8> (not Vec<u64>)
       const distributionLength = safeRead.u32();
-      const distribution = [];
-      for (let i = 0; i < distributionLength; i++) {
-        distribution.push(safeRead.u64());
-      }
+      const distribution = Array.from(safeRead.bytes(distributionLength));
       
       // Read flags Vec<u8>
       const flagsLength = safeRead.u32();
@@ -727,52 +910,78 @@ export class BlockchainIntegrationService {
         strings.push(safeRead.string());
       }
       
-      // Read keys Vec<String>
+      // Read keys Vec<Pubkey> (not Vec<String>)
       const keysLength = safeRead.u32();
       const keys = [];
       for (let i = 0; i < keysLength; i++) {
-        keys.push(safeRead.string());
+        keys.push(safeRead.pubkey().toBase58());
       }
       
+      // Read instant launch fields (pump.fun-style bonding curve)
+      // These fields were added for instant launches
+      const isTradable = safeRead.bool();
+      const tokensSold = safeRead.u64();
+      const isGraduated = safeRead.bool();
+      const graduationThreshold = safeRead.u64();
+      
       // Extract actual SPL token mint from keys array
+      // For instant launches: keys[2] (WSOLAddress slot) contains base_token_mint
+      // keys[0] = Seller (creator)
+      // keys[1] = TeamWallet
+      // keys[2] = WSOLAddress (for instant launches, this is base_token_mint before graduation)
       let actualTokenMint = '';
       
-      for (const key of keys) {
-        // Try to parse as PublicKey to find valid SPL token mints
-        try {
-          // Skip IPFS hashes and other non-PublicKey strings
-          if (key.length === 44 && !key.includes('bafkrei') && !key.includes('Qm')) {
-            const publicKey = new PublicKey(key);
-            
-            // Check if this PublicKey is actually an SPL token mint
+      // Priority 1: Check keys[2] first (where token mint is stored for instant launches)
+      if (keys.length > 2 && keys[2]) {
+        const tokenMintKey = keys[2];
+        if (tokenMintKey.length === 44 && !tokenMintKey.includes('bafkrei') && !tokenMintKey.includes('Qm')) {
+          try {
+            const publicKey = new PublicKey(tokenMintKey);
+            // Verify it's actually a token mint by checking account owner
             const accountInfo = await this.throttledRequest(() => this.connection.getAccountInfo(publicKey));
-            if (accountInfo && accountInfo.owner.toBase58() === TOKEN_PROGRAM_ID.toBase58()) {
+            if (accountInfo && (
+              accountInfo.owner.toBase58() === TOKEN_PROGRAM_ID.toBase58() ||
+              accountInfo.owner.toBase58() === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+            )) {
               actualTokenMint = publicKey.toBase58();
-              break; // Use the first valid SPL token mint we find
-            } else if (accountInfo && accountInfo.owner.toBase58() === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
-              // Token 2022 mint
-              actualTokenMint = publicKey.toBase58();
-              break; // Use the first valid Token 2022 mint we find
             }
+          } catch (e) {
+            // Skip if invalid
           }
-        } catch (e) {
-          // Silently skip invalid keys
-          continue;
         }
       }
       
-      // Read creator Pubkey (32 bytes)
-      const creatorBytes = Array.from(safeRead.bytes(32));
-      const creatorPubkey = new PublicKey(creatorBytes);
-      
-      // Read upvotes (u32)
-      const upvotes = safeRead.u32();
-      
-      // Read downvotes (u32)
-      const downvotes = safeRead.u32();
-      
-      // Read is_tradable (u8)
-      const isTradable = safeRead.u8();
+      // Priority 2: If keys[2] didn't work, search all keys for token mints
+      if (!actualTokenMint) {
+        for (const key of keys) {
+          // Try to parse as PublicKey to find valid SPL token mints
+          try {
+            // Skip IPFS hashes and other non-PublicKey strings
+            if (key.length === 44 && !key.includes('bafkrei') && !key.includes('Qm')) {
+              const publicKey = new PublicKey(key);
+              
+              // Skip WSOL address
+              if (publicKey.toBase58() === 'So11111111111111111111111111111111111111112') {
+                continue;
+              }
+              
+              // Check if this PublicKey is actually an SPL token mint
+              const accountInfo = await this.throttledRequest(() => this.connection.getAccountInfo(publicKey));
+              if (accountInfo && accountInfo.owner.toBase58() === TOKEN_PROGRAM_ID.toBase58()) {
+                actualTokenMint = publicKey.toBase58();
+                break; // Use the first valid SPL token mint we find
+              } else if (accountInfo && accountInfo.owner.toBase58() === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
+                // Token 2022 mint
+                actualTokenMint = publicKey.toBase58();
+                break; // Use the first valid Token 2022 mint we find
+              }
+            }
+          } catch (e) {
+            // Silently skip invalid keys
+            continue;
+          }
+        }
+      }
       
       // Extract token metadata from strings array
       // strings[0]=name, strings[1]=symbol, strings[2]=uri, strings[3]=icon, strings[4]=banner
@@ -975,14 +1184,45 @@ export class BlockchainIntegrationService {
       const displayIcon = convertIPFSUrl(finalTokenIcon);
       const displayBanner = convertIPFSUrl(finalTokenBanner);
       
-      // Use actual token metadata if available, otherwise fallback to pageName or account ID
-      const displayName = tokenName || pageName || accountPubkey.toBase58().slice(0, 8);
-      const displaySymbol = tokenSymbol || pageName.toUpperCase().slice(0, 4) || 'TOKEN';
+      // Fetch full metadata from metadata URI if available (for Token-2022 metadata)
+      // This ensures we get the correct image, name, and symbol from IPFS
+      let metadataImage: string | null = null;
+      let metadataName: string | null = null;
+      let metadataSymbol: string | null = null;
+      if (tokenUri) {
+        try {
+          const { getFullTokenMetadata } = await import('./ipfsMetadataFetcher');
+          const fullMetadata = await getFullTokenMetadata(tokenUri);
+          if (fullMetadata) {
+            metadataImage = fullMetadata.image || null;
+            metadataName = fullMetadata.name || null;
+            metadataSymbol = fullMetadata.symbol || null;
+            if (metadataImage) {
+              console.log('✅ Fetched image from metadata URI (async):', metadataImage);
+            }
+            if (metadataName) {
+              console.log('✅ Fetched name from metadata URI (async):', metadataName);
+            }
+            if (metadataSymbol) {
+              console.log('✅ Fetched symbol from metadata URI (async):', metadataSymbol);
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ Could not fetch metadata from URI (async parser):', error);
+        }
+      }
       
-      // Use real metadata images, no hardcoded fallbacks
-      const displayImage = displayIcon || null;
+      // Use metadata from IPFS if available, otherwise fallback to blockchain data
+      const displayName = metadataName || tokenName || pageName || accountPubkey.toBase58().slice(0, 8);
+      const displaySymbol = metadataSymbol || tokenSymbol || pageName.toUpperCase().slice(0, 4) || 'TOKEN';
+      
+      // Prioritize image from metadata URI over icon
+      const displayImage = metadataImage || displayIcon || null;
       const displayBannerFinal = displayBanner || null;
   
+      // Extract creator from keys array (Seller or TeamWallet)
+      const creatorKey = keys.length > 0 ? keys[0] : accountPubkey.toBase58();
+      
       return {
         id: accountPubkey.toBase58(),
         name: displayName,
@@ -998,18 +1238,22 @@ export class BlockchainIntegrationService {
         ticketPrice: Number(ticketPrice) / 1e9,
         launchDate: new Date(launchDateMs),
         endDate: new Date(endDateMs),
-        creator: creatorPubkey.toBase58(),
-        isTradable: isTradable === 1,
-        upvotes,
-        downvotes,
-        participants: upvotes + downvotes,
+        creator: creatorKey, // Use first key (Seller) as creator
+        isTradable,
+        upvotes: 0, // Not in new structure
+        downvotes: 0, // Not in new structure
+        tokensSold: Number(tokensSold),
+        isGraduated,
+        graduationThreshold: Number(graduationThreshold),
+        participants: 0, // Not in new structure
         programId: this.programId.toBase58(),
         accountAddress: accountPubkey.toBase58(),
         pageName: pageName,
         ticketsSold,
         ticketsClaimed: ticketClaimed,
         mintsWon,
-        baseTokenMint: actualTokenMint || accountPubkey.toBase58(), // Use actual SPL token mint or fallback to launch account
+        numMints: Number(numMints), // Maximum tickets (0 = unlimited)
+        baseTokenMint: actualTokenMint || listing, // Use actual SPL token mint or fallback to listing (derived from token mint), NOT accountPubkey
         quoteTokenMint: 'So11111111111111111111111111111111111111112', // SOL
         rawMetadata: {
           tokenName, tokenSymbol, tokenUri, tokenIcon, tokenBanner, strings, keys
@@ -1023,14 +1267,40 @@ export class BlockchainIntegrationService {
   /**
    * Fetch specific launch by account address using cached data
    */
-  async getLaunchByAddress(address: string): Promise<BlockchainLaunchData | null> {
+  async getLaunchByAddress(address: string, retryCount: number = 0, maxRetries: number = 3): Promise<BlockchainLaunchData | null> {
     // Check cache first
     if (this.cache.has(address)) {
       return this.cache.get(address) || null;
     }
 
+    // Try direct account fetch first (for newly created launches)
+    try {
+      const accountPubkey = new PublicKey(address);
+      const accountInfo = await this.throttledRequest(() => 
+        this.connection.getAccountInfo(accountPubkey)
+      );
+      
+      if (accountInfo && accountInfo.data.length > 0) {
+        // Try to parse directly
+        const launchData = await this.parseLaunchAccountDataSync(accountInfo.data, accountPubkey);
+        if (launchData) {
+          console.log('✅ Found launch via direct account fetch:', address);
+          this.cache.set(launchData.id, launchData);
+          return launchData;
+        }
+      }
+    } catch (directFetchError) {
+      // If direct fetch fails, continue with cache refresh
+      if (retryCount === 0) {
+        console.log('⚠️ Direct account fetch failed, trying cache refresh:', directFetchError);
+      }
+    }
+
     // If not in cache, populate cache first
-    console.log('🔄 Launch not in cache, fetching all launches first...');
+    if (retryCount === 0) {
+      console.log('🔄 Launch not in cache, fetching all launches first...');
+    }
+    
     try {
       await this.getAllLaunches();
       
@@ -1040,10 +1310,26 @@ export class BlockchainIntegrationService {
         return this.cache.get(address) || null;
       }
       
-      console.log('❌ Launch not found:', address);
+      // If not found and we haven't exhausted retries, wait and retry
+      if (retryCount < maxRetries) {
+        const waitTime = (retryCount + 1) * 2000; // 2s, 4s, 6s
+        console.log(`⏳ Launch not found yet, retrying in ${waitTime/1000}s (attempt ${retryCount + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        return this.getLaunchByAddress(address, retryCount + 1, maxRetries);
+      }
+      
+      console.log('❌ Launch not found after retries:', address);
       return null;
     } catch (error) {
-      console.error('❌ Error fetching launch by address:', error);
+      // Retry on error if we haven't exhausted retries
+      if (retryCount < maxRetries) {
+        const waitTime = (retryCount + 1) * 2000;
+        console.log(`⚠️ Error fetching launch, retrying in ${waitTime/1000}s (attempt ${retryCount + 1}/${maxRetries})...`, error);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        return this.getLaunchByAddress(address, retryCount + 1, maxRetries);
+      }
+      
+      console.error('❌ Error fetching launch by address after retries:', error);
       return null;
     }
   }

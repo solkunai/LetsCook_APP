@@ -9,7 +9,7 @@ use spl_token_2022::extension::{BaseStateWithExtensions, StateWithExtensions};
 use crate::hybrid::{
     get_collection_plugin_map, CollectionData, CollectionKeys, CollectionMeta, CollectionPlugin, CollectionPluginType, NFTAssignment,
 };
-use crate::{accounts, instruction::accounts::MintRandomNFTAccounts};
+use crate::{accounts, instruction::accounts::MintRandomNFTAccounts, utils::mpl_compat::convert_mpl_error};
 
 use crate::utils;
 
@@ -27,17 +27,20 @@ fn mint_random_collection_nft<'a>(
     randoms: [f64; 25],
 ) -> ProgramResult {
     msg!("create collection asset");
-    let _create_cpi = CreateV1CpiBuilder::new(core_account_info)
-        .authority(Some(sol_account_info))
-        .asset(nft_mint_account_info)
-        .collection(Some(collection_mint_account_info))
-        .payer(user_account_info)
-        .owner(Some(sol_account_info))
-        .data_state(mpl_core::types::DataState::AccountState)
-        .name(nft_name.to_string())
-        .uri(nft_meta.to_string())
-        .system_program(system_program_account_info)
-        .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])?;
+    unsafe {
+        let _create_cpi = CreateV1CpiBuilder::new(unsafe { std::mem::transmute(core_account_info) })
+            .authority(Some(unsafe { std::mem::transmute(sol_account_info) }))
+            .asset(unsafe { std::mem::transmute(nft_mint_account_info) })
+            .collection(Some(unsafe { std::mem::transmute(collection_mint_account_info) }))
+            .payer(unsafe { std::mem::transmute(user_account_info) })
+            .owner(Some(unsafe { std::mem::transmute(sol_account_info) }))
+            .data_state(mpl_core::types::DataState::AccountState)
+            .name(nft_name.to_string())
+            .uri(nft_meta.to_string())
+            .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+            .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])
+            .map_err(|e| convert_mpl_error(e))?;
+    }
 
     // see if we need to generate some attributes
     let collection = mpl_core::Collection::from_bytes(&collection_mint_account_info.data.borrow()[..])?;
@@ -60,16 +63,19 @@ fn mint_random_collection_nft<'a>(
             });
         }
 
-        mpl_core::instructions::AddPluginV1CpiBuilder::new(core_account_info)
-            .collection(Some(collection_mint_account_info))
-            .asset(nft_mint_account_info)
-            .payer(user_account_info)
-            .authority(Some(sol_account_info))
-            .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
-                attribute_list: attribute_list,
-            }))
-            .system_program(system_program_account_info)
-            .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])?;
+        unsafe {
+            mpl_core::instructions::AddPluginV1CpiBuilder::new(unsafe { std::mem::transmute(core_account_info) })
+                .collection(Some(unsafe { std::mem::transmute(collection_mint_account_info) }))
+                .asset(unsafe { std::mem::transmute(nft_mint_account_info) })
+                .payer(unsafe { std::mem::transmute(user_account_info) })
+                .authority(Some(unsafe { std::mem::transmute(sol_account_info) }))
+                .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
+                    attribute_list: attribute_list,
+                }))
+                .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+                .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])
+                .map_err(|e| convert_mpl_error(e))?;
+        }
     }
     Ok(())
 }
@@ -293,13 +299,16 @@ pub fn mint_random<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>]) -> 
         randoms,
     )?;
 
-    let _transfer = TransferV1CpiBuilder::new(ctx.accounts.core_program)
-        .asset(ctx.accounts.asset)
-        .authority(Some(ctx.accounts.cook_pda))
-        .payer(ctx.accounts.user)
-        .new_owner(ctx.accounts.user)
-        .collection(Some(ctx.accounts.collection))
-        .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])?;
+    unsafe {
+        let _transfer = TransferV1CpiBuilder::new(unsafe { std::mem::transmute(ctx.accounts.core_program) })
+            .asset(unsafe { std::mem::transmute(ctx.accounts.asset) })
+            .authority(Some(unsafe { std::mem::transmute(ctx.accounts.cook_pda) }))
+            .payer(unsafe { std::mem::transmute(ctx.accounts.user) })
+            .new_owner(unsafe { std::mem::transmute(ctx.accounts.user) })
+            .collection(Some(unsafe { std::mem::transmute(ctx.accounts.collection) }))
+            .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])
+            .map_err(|e| convert_mpl_error(e))?;
+    }
 
     Ok(())
 }

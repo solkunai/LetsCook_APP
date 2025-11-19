@@ -28,7 +28,8 @@ import {
   Award
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { Connection, PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getConnectionWithTimeout } from '@/lib/connection';
 import { 
   createInitializeMintInstruction,
   TOKEN_PROGRAM_ID, 
@@ -61,7 +62,19 @@ import { Buffer } from 'buffer';
 const STEPS = ['basic', 'dex', 'config', 'social', 'review'];
 
 // Ledger wallet for platform fees - loaded from environment variable
-const LEDGER_WALLET = new PublicKey(import.meta.env.VITE_LEDGER_WALLET || 'A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
+// In production, this MUST be set - no fallback
+const getLedgerWallet = (): PublicKey => {
+  const wallet = import.meta.env.VITE_LEDGER_WALLET;
+  if (!wallet) {
+    if (import.meta.env.DEV) {
+      console.warn('VITE_LEDGER_WALLET not set, using devnet fallback');
+      return new PublicKey('A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
+    }
+    throw new Error('VITE_LEDGER_WALLET environment variable is required in production');
+  }
+  return new PublicKey(wallet);
+};
+const LEDGER_WALLET = getLedgerWallet();
 
 export default function CreateRafflePage() {
   const { connected, publicKey, wallet, sendTransaction } = useWallet();
@@ -72,15 +85,8 @@ export default function CreateRafflePage() {
   const [createdLaunchId, setCreatedLaunchId] = useState<string | null>(null);
   const [createdTokenMint, setCreatedTokenMint] = useState<string | null>(null);
 
-  // Connection to devnet with better timeout settings
-  const connection = new Connection('https://api.devnet.solana.com', {
-    commitment: 'confirmed',
-    confirmTransactionInitialTimeout: 60000,
-    disableRetryOnRateLimit: false,
-    httpHeaders: {
-      'Content-Type': 'application/json',
-    },
-  });
+  // Connection using environment variable with timeout settings
+  const connection = getConnectionWithTimeout('confirmed', 60000);
 
   // Define the form data type for raffle launches
   interface RaffleFormData {
@@ -92,6 +98,7 @@ export default function CreateRafflePage() {
     decimals: number;
     ticketPrice: number;
     maxTickets: number;
+    unlimitedTickets: boolean; // New: if true, send 0 to backend (means up to total_supply)
     raffleDuration: number;
     winnerCount: number;
     website: string;
@@ -118,6 +125,7 @@ export default function CreateRafflePage() {
     decimals: 9,
     ticketPrice: 0.1,
     maxTickets: 1000,
+    unlimitedTickets: false,
     raffleDuration: 24,
     winnerCount: 100,
     website: '',
@@ -174,10 +182,27 @@ export default function CreateRafflePage() {
         break;
       case 2: // Config
         if (formData.ticketPrice <= 0) newErrors.ticketPrice = 'Ticket price must be greater than 0';
-        if (formData.maxTickets <= 0) newErrors.maxTickets = 'Max tickets must be greater than 0';
+        // Only validate maxTickets if not unlimited
+        if (!formData.unlimitedTickets && formData.maxTickets <= 0) {
+          newErrors.maxTickets = 'Max tickets must be greater than 0';
+        }
         if (formData.raffleDuration <= 0) newErrors.raffleDuration = 'Duration must be greater than 0';
         if (formData.winnerCount <= 0) newErrors.winnerCount = 'Winner count must be greater than 0';
-        if (formData.winnerCount > formData.maxTickets) newErrors.winnerCount = 'Winner count cannot exceed max tickets';
+        // If unlimited, compare to totalSupply, otherwise to maxTickets
+        const effectiveMaxTickets = formData.unlimitedTickets ? formData.totalSupply : formData.maxTickets;
+        if (formData.winnerCount > effectiveMaxTickets) {
+          newErrors.winnerCount = `Winner count cannot exceed ${formData.unlimitedTickets ? 'total supply' : 'max tickets'}`;
+        }
+        break;
+      case 3: // Social (includes image)
+        if (!formData.image || formData.image.trim() === '') {
+          newErrors.image = 'Token image is required';
+        }
+        break;
+      case 4: // Review - validate image again before final submission
+        if (!formData.image || formData.image.trim() === '') {
+          newErrors.image = 'Token image is required';
+        }
         break;
     }
 
@@ -346,15 +371,30 @@ export default function CreateRafflePage() {
   };
 
   const removeImage = () => {
-    updateFormData('image', '');
+    // Image is required, show warning instead of removing
     toast({
-      title: "Image Removed",
-      description: "Token image removed.",
+      title: "Image Required",
+      description: "Token image is required and cannot be removed. Please upload a new image to replace it.",
+      variant: "destructive",
     });
   };
 
   const handleSubmit = async () => {
+    // Validate all steps including image requirement
     if (!validateStep(currentStep)) return;
+    
+    // Final validation: ensure image is present
+    if (!formData.image || formData.image.trim() === '') {
+      toast({
+        title: "Image Required",
+        description: "Token image is required to create a launch. Please upload an image.",
+        variant: "destructive",
+      });
+      setErrors(prev => ({ ...prev, image: 'Token image is required' }));
+      // Navigate to social step (step 3) where image upload is
+      setCurrentStep(3);
+      return;
+    }
     
     if (!connected || !publicKey || !wallet || !sendTransaction) {
       toast({
@@ -391,15 +431,26 @@ export default function CreateRafflePage() {
     setIsSubmitting(true);
 
     try {
-      // Generate keypair for base token mint (quote token is WSOL - not a custom token)
-      const baseTokenMintKeypair = Keypair.generate();
+      // Derive page_name for PDA derivation
+      const pageName = formData.name.toLowerCase().replace(/\s+/g, '-').substring(0, 10);
+      
+      // Derive token mint PDA from page_name with "cook" prefix (deterministic, no random keypair needed)
+      console.log('🔑 Deriving token mint PDA from page_name with "cook" prefix...');
+      const [baseTokenMintPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('cook'), Buffer.from('TokenMint'), Buffer.from(pageName)],
+        PROGRAM_ID
+      );
+      console.log(`✅ Derived token mint PDA: ${baseTokenMintPDA.toBase58()}`);
+      
+      // Note: No keypair needed for token mint - it's a PDA created by the program
+      const baseTokenMintKeypair = null;
       // Quote token is WSOL (Wrapped SOL) - standard mint address
       const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
       // Team wallet is the user's wallet address (where team allocations go)
       const teamWallet = publicKey;
 
       console.log('🔑 Generated keypairs:', {
-        baseTokenMint: baseTokenMintKeypair.publicKey.toBase58(),
+        baseTokenMint: baseTokenMintPDA.toBase58(),
         quoteTokenMint: WSOL_MINT.toBase58(), // WSOL
         team: teamWallet.toBase58()
       });
@@ -409,7 +460,7 @@ export default function CreateRafflePage() {
       
       // Derive AMM PDA to use as mint authority
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), baseTokenMintKeypair.publicKey.toBuffer()],
+        [Buffer.from('amm'), baseTokenMintPDA.toBuffer()],
         PROGRAM_ID
       );
       console.log('🔍 AMM PDA (mint authority):', ammPDA.toBase58());
@@ -420,7 +471,7 @@ export default function CreateRafflePage() {
       try {
         metadataResult = await LaunchpadTokenMetadataService.createTokenMetadata(
           connection,
-          baseTokenMintKeypair.publicKey,
+          baseTokenMintPDA,
           {
             name: formData.name,
             symbol: formData.symbol,
@@ -438,6 +489,7 @@ export default function CreateRafflePage() {
         if (metadataResult.success) {
           console.log('✅ Token metadata created successfully');
           console.log('📊 Metadata URI:', metadataResult.metadataUri);
+          console.log('ℹ️ Token mint PDA will be created and initialized by the program');
         } else {
           throw new Error(metadataResult.error || 'Failed to create token metadata');
         }
@@ -446,103 +498,10 @@ export default function CreateRafflePage() {
         throw new Error('Failed to create token metadata for raffle launch');
       }
       
-      // Now create the base token mint account with proper space calculation
-      console.log('🏗️ Creating base token mint account with calculated space...');
-      const extensions = [ExtensionType.MetadataPointer];
-      // Calculate the actual metadata size from the JSON we created
-      const metadataSize = TYPE_SIZE + LENGTH_SIZE + pack({
-        name: formData.name,
-        symbol: formData.symbol,
-        uri: metadataResult.metadataUri || '',
-        updateAuthority: publicKey,
-        mint: baseTokenMintKeypair.publicKey,
-        additionalMetadata: []
-      }).length;
-      
-      // Create account with space for mint + metadata pointer extension only
-      // But fund it with enough lamports for the final size (including metadata content)
-      const mintLen = getMintLen(extensions);
-      const totalSpace = mintLen + metadataSize;
-      const baseTokenMintLamports = await connection.getMinimumBalanceForRentExemption(totalSpace);
-      
-      const tokenMintTransaction = new Transaction();
-      
-      tokenMintTransaction.add(
-        SystemProgram.createAccount({
-          fromPubkey: publicKey,
-          newAccountPubkey: baseTokenMintKeypair.publicKey,
-          space: mintLen,
-          lamports: baseTokenMintLamports,
-          programId: TOKEN_2022_PROGRAM_ID,
-        })
-      );
-
-      // Initialize metadata pointer extension (points to the mint itself for metadata)
-      tokenMintTransaction.add(
-        createInitializeMetadataPointerInstruction(
-          baseTokenMintKeypair.publicKey, // mint
-          publicKey, // authority (user wallet)
-          baseTokenMintKeypair.publicKey, // metadata address (self)
-          TOKEN_2022_PROGRAM_ID
-        )
-      );
-
-      // Initialize base token mint with user as mint authority (can be transferred to AMM PDA later)
-      tokenMintTransaction.add(
-        createInitializeMintInstruction(
-          baseTokenMintKeypair.publicKey, // mint
-          formData.decimals, // decimals
-          publicKey, // mint authority (user wallet)
-          publicKey, // freeze authority (user)
-          TOKEN_2022_PROGRAM_ID
-        )
-      );
-      
-      // Initialize the metadata on the Token-2022 mint with the actual IPFS URI
-      console.log('🏷️ Initializing metadata on Token-2022 mint with IPFS URI...');
-      try {
-        tokenMintTransaction.add(
-          createInitializeMetadataInstruction({
-            programId: TOKEN_2022_PROGRAM_ID,
-            mint: baseTokenMintKeypair.publicKey,
-            metadata: baseTokenMintKeypair.publicKey, // metadata stored in mint itself
-            mintAuthority: publicKey, // user wallet (will be transferred to AMM PDA later)
-            updateAuthority: publicKey, // user wallet
-            name: formData.name,
-            symbol: formData.symbol,
-            uri: metadataResult.metadataUri || ''
-          })
-        );
-        console.log('✅ Metadata initialization instruction added with IPFS URI');
-      } catch (error) {
-        console.warn('⚠️ Failed to add metadata initialization instruction:', error);
-      }
-
-      // Quote token is WSOL (already exists on-chain), no need to create it
-      // WSOL mint: So11111111111111111111111111111111111111112
-
-      // Send token mint transaction (only for base token)
-      const tokenMintSignature = await sendTransaction(tokenMintTransaction, connection, { 
-        signers: [baseTokenMintKeypair]
-      });
-      console.log('✅ Base token mint created and initialized:', tokenMintSignature);
-
-      // Transfer mint authority to AMM PDA
-      console.log('🔄 Transferring mint authority to AMM PDA...');
-      const transferAuthorityTransaction = new Transaction();
-      transferAuthorityTransaction.add(
-        createSetAuthorityInstruction(
-          baseTokenMintKeypair.publicKey,
-          publicKey,
-          AuthorityType.MintTokens,
-          ammPDA,
-          [],
-          TOKEN_2022_PROGRAM_ID
-        )
-      );
-
-      const transferSignature = await sendTransaction(transferAuthorityTransaction, connection);
-      console.log('✅ Mint authority transferred to AMM PDA:', transferSignature);
+      // Note: Token mint PDA account creation and initialization is handled by the program
+      // The program will create the PDA account and initialize it as a token mint
+      // No need to create it here or transfer authority - the program handles it
+      console.log('ℹ️ Token mint PDA will be created and initialized by the program');
 
       // Wait for token mint transaction to be fully processed
       console.log('⏳ Waiting for token mint transaction to be fully processed...');
@@ -551,8 +510,13 @@ export default function CreateRafflePage() {
       const transaction = new Transaction();
 
       // Generate keypairs for listing and launchData accounts (not PDAs for old processor)
-      const listingKeypair = Keypair.generate();
-      const launchDataKeypair = Keypair.generate();
+      // Generate listing and launch data keypairs with "cook" in addresses
+      const listingResult = generateKeypairWithCook('any', 500);
+      const launchDataResult = generateKeypairWithCook('any', 500);
+      const listingKeypair = listingResult.keypair;
+      const launchDataKeypair = launchDataResult.keypair;
+      console.log(`✅ Generated listing keypair with "cook": ${listingKeypair.publicKey.toBase58()}`);
+      console.log(`✅ Generated launch data keypair with "cook": ${launchDataKeypair.publicKey.toBase58()}`);
       
       console.log('🎯 Generated account keypairs:', {
         listing: listingKeypair.publicKey.toBase58(),
@@ -604,7 +568,7 @@ export default function CreateRafflePage() {
         decimals: formData.decimals,
         launch_date: Math.floor(Date.now() / 1000), // Current timestamp
         close_date: Math.floor(Date.now() / 1000) + (formData.raffleDuration * 60 * 60), // Duration in seconds
-        num_mints: formData.maxTickets,
+        num_mints: formData.unlimitedTickets ? 0 : formData.maxTickets, // 0 means unlimited (backend caps at total_supply)
         ticket_price: formData.ticketPrice * 1_000_000_000, // Convert to lamports
         page_name: formData.name.toLowerCase().replace(/\s+/g, '-'),
         transfer_fee: 0,
@@ -622,8 +586,8 @@ export default function CreateRafflePage() {
       // Optimize createLaunchArgs for smaller transaction size
       const optimizedCreateArgs = {
         name: createLaunchArgs.name.substring(0, 16), // Limit to 16 chars (reduced from 20)
-        symbol: createLaunchArgs.symbol.substring(0, 4), // Limit to 4 chars (reduced from 6)
-        uri: createLaunchArgs.uri.substring(0, 50), // Limit URI but keep metadata link
+        symbol: createLaunchArgs.symbol.substring(0, 6), // Limit to 6 chars for Token-2022 symbols
+        uri: createLaunchArgs.uri, // Keep full URI for Token-2022 metadata (IPFS URLs are ~100 chars)
         icon: createLaunchArgs.icon, // Keep the IPFS hash
         banner: createLaunchArgs.banner, // Keep the IPFS hash
         total_supply: createLaunchArgs.total_supply,
@@ -691,24 +655,23 @@ export default function CreateRafflePage() {
       );
       
       // Derive launchQuote address (seeded account, not PDA)
-      // Using first 32 characters of base_token_mint base58 as seed
-      const mintSeed = baseTokenMintKeypair.publicKey.toBase58().substring(0, 32);
+      // Backend uses: create_account_with_seed(user, launch_quote, cook_pda, mint_seed, ...)
+      // where mint_seed is first 32 characters of base_token_mint.to_string()
+      const mintSeed = baseTokenMintPDA.toBase58().substring(0, 32);
       // Seeded address formula: seededPubkey = createWithSeed(basePubkey, seed, program)
-      const launchQuoteResult = PublicKey.createWithSeed(
+      const launchQuotePda = PublicKey.createWithSeed(
         cookPdaPda,
         mintSeed,
         TOKEN_2022_PROGRAM_ID
       );
-      const launchQuotePda = await launchQuoteResult;
       
-      // Derive cookBaseToken PDA (ATA for cookPda)
-      const [cookBaseTokenPda] = PublicKey.findProgramAddressSync(
-        [
-          cookPdaPda.toBuffer(),
-          TOKEN_2022_PROGRAM_ID.toBuffer(),
-          baseTokenMintKeypair.publicKey.toBuffer(),
-        ],
-        new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+      // Derive cookBaseToken PDA (ATA for cookPda using base token mint)
+      const { getAssociatedTokenAddress } = await import('@solana/spl-token');
+      const cookBaseTokenPda = getAssociatedTokenAddress(
+        baseTokenMintPDA,
+        cookPdaPda,
+        true, // allowOwnerOffCurve
+        TOKEN_2022_PROGRAM_ID
       );
       
       console.log('📊 Derived PDAs:', {
@@ -723,19 +686,21 @@ export default function CreateRafflePage() {
         optimizedCreateArgs,
         {
           user: publicKey,
-          listing: listingKeypair.publicKey, // Use generated keypair (old processor expects regular accounts)
-          launchData: launchDataKeypair.publicKey, // Use generated keypair (old processor expects regular accounts)
+          listing: listingKeypair.publicKey,
+          launchData: launchDataKeypair.publicKey,
+          team: teamWallet, // Team wallet is the user's wallet
+          baseTokenMint: baseTokenMintPDA,
           quoteTokenMint: WSOL_MINT, // WSOL (Wrapped SOL)
-          launchQuote: launchQuotePda,
           cookData: cookDataPda,
           cookPda: cookPdaPda,
-          baseTokenMint: baseTokenMintKeypair.publicKey,
+          launchQuote: launchQuotePda,
           cookBaseToken: cookBaseTokenPda,
-          team: teamWallet, // Team wallet is the user's wallet
-          quoteTokenProgram: TOKEN_2022_PROGRAM_ID,
-          baseTokenProgram: TOKEN_2022_PROGRAM_ID,
-          associatedToken: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          token2022Program: TOKEN_2022_PROGRAM_ID,
+          baseTokenProgram: TOKEN_2022_PROGRAM_ID,
+          quoteTokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedToken: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
         }
       );
 
@@ -772,7 +737,7 @@ export default function CreateRafflePage() {
       // if (formData.initialLiquidity > 0) {
       //   const liquidityInstruction = SystemProgram.transfer({
       //     fromPubkey: publicKey,
-      //     toPubkey: baseTokenMintKeypair.publicKey,
+      //     toPubkey: baseTokenMintPDA,
       //     lamports: Math.floor(formData.initialLiquidity * 1e9),
       //   });
       //   transaction.add(liquidityInstruction);
@@ -1084,7 +1049,7 @@ export default function CreateRafflePage() {
           try {
             const metadataResult = await LaunchpadTokenMetadataService.createTokenMetadata(
               connection,
-              baseTokenMintKeypair.publicKey,
+              baseTokenMintPDA,
               {
                 name: formData.name,
                 symbol: formData.symbol,
@@ -1124,9 +1089,32 @@ export default function CreateRafflePage() {
             });
           }
       
+      // Store name, symbol, image, description, socials, and IPFS metadata URI in Supabase
+      // Name, symbol, and image are stored directly for fastest access (no IPFS fetch needed)
+      try {
+        const { LaunchMetadataService } = await import('@/lib/launchMetadataService');
+        await LaunchMetadataService.storeMetadata({
+          launch_id: launchDataKeypair.publicKey.toBase58(),
+          token_mint: baseTokenMintPDA.toBase58(),
+          metadata_uri: metadataResult?.metadataUri || undefined, // Store IPFS metadata URI as fallback
+          name: formData.name || undefined, // Store directly for fastest access
+          symbol: formData.symbol || undefined, // Store directly for fastest access
+          image: formData.image || undefined, // Store directly for fastest access
+          description: formData.description || undefined,
+          website: formData.website || undefined,
+          twitter: formData.twitter || undefined,
+          telegram: formData.telegram || undefined,
+          discord: formData.discord || undefined,
+        });
+        console.log('✅ Raffle metadata stored in Supabase (name, symbol, image stored directly for fast access)');
+      } catch (metadataError) {
+        console.warn('⚠️ Failed to store metadata in Supabase (non-critical):', metadataError);
+        // Don't throw - metadata storage failure shouldn't block raffle creation
+      }
+      
       setTxSignature(signature);
       setCreatedLaunchId(launchDataKeypair.publicKey.toBase58());
-      setCreatedTokenMint(baseTokenMintKeypair.publicKey.toBase58());
+      setCreatedTokenMint(baseTokenMintPDA.toBase58());
 
       // Clear cache so the new raffle appears immediately
       console.log('🗑️ Clearing cache to refresh raffle list...');
@@ -1193,6 +1181,7 @@ export default function CreateRafflePage() {
       decimals: 9,
       ticketPrice: 0.1,
       maxTickets: 1000,
+      unlimitedTickets: false,
       raffleDuration: 24,
       winnerCount: 100,
       website: '',
@@ -1480,7 +1469,14 @@ export default function CreateRafflePage() {
                   {/* Image Upload Section */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-semibold text-white">Token Image</h3>
+                      <div>
+                        <h3 className="text-lg font-semibold text-white">
+                          Token Image <span className="text-red-400">*</span>
+                        </h3>
+                        {errors.image && (
+                          <p className="text-red-400 text-xs mt-1">{errors.image}</p>
+                        )}
+                      </div>
                       <div className="flex items-center space-x-2">
                         {pinataService.isPinataConfigured() ? (
                           <div className="flex items-center space-x-1 text-green-400">
@@ -1499,7 +1495,7 @@ export default function CreateRafflePage() {
                     <div className="flex justify-center">
                       <div className="space-y-2">
                         <label className="block text-sm font-medium text-slate-300 text-center">
-                          Upload Token Image (Recommended: Square, 512x512px)
+                          Upload Token Image <span className="text-red-400">*</span> (Recommended: Square, 512x512px)
                         </label>
                         <div className="relative">
                           {formData.image ? (
@@ -1507,19 +1503,38 @@ export default function CreateRafflePage() {
                               <img 
                                 src={formData.image} 
                                 alt="Token Image" 
-                                className="w-32 h-32 rounded-lg object-cover mx-auto border-2 border-yellow-500"
+                                className={`w-32 h-32 rounded-lg object-cover mx-auto border-2 ${
+                                  errors.image ? 'border-red-500' : 'border-yellow-500'
+                                }`}
                               />
                               <button
-                                onClick={removeImage}
-                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                                onClick={() => {
+                                  // Allow replacing image by clicking to upload new one
+                                  const input = document.createElement('input');
+                                  input.type = 'file';
+                                  input.accept = 'image/*';
+                                  input.onchange = (e) => {
+                                    const file = (e.target as HTMLInputElement).files?.[0];
+                                    if (file) handleImageUpload(file);
+                                  };
+                                  input.click();
+                                }}
+                                className="absolute -top-2 -right-2 bg-blue-500 text-white rounded-full p-1 hover:bg-blue-600"
+                                title="Replace image"
                               >
-                                <X className="w-3 h-3" />
+                                <Upload className="w-3 h-3" />
                               </button>
                             </div>
                           ) : (
-                            <div className="w-32 h-32 border-2 border-dashed border-slate-600 rounded-lg flex flex-col items-center justify-center mx-auto hover:border-yellow-500 transition-colors cursor-pointer">
-                              <Image className="w-8 h-8 text-slate-400 mb-2" />
-                              <span className="text-xs text-slate-400">Click to upload</span>
+                            <div className={`w-32 h-32 border-2 border-dashed rounded-lg flex flex-col items-center justify-center mx-auto transition-colors cursor-pointer ${
+                              errors.image 
+                                ? 'border-red-500 bg-red-500/10' 
+                                : 'border-slate-600 hover:border-yellow-500'
+                            }`}>
+                              <Image className={`w-8 h-8 mb-2 ${errors.image ? 'text-red-400' : 'text-slate-400'}`} />
+                              <span className={`text-xs ${errors.image ? 'text-red-400' : 'text-slate-400'}`}>
+                                {errors.image ? 'Image required' : 'Click to upload'}
+                              </span>
                             </div>
                           )}
                           <input
@@ -1659,18 +1674,44 @@ export default function CreateRafflePage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
-                        Maximum Tickets *
-                      </label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-slate-300">
+                          Maximum Tickets {!formData.unlimitedTickets && '*'}
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.unlimitedTickets}
+                            onChange={(e) => {
+                              updateFormData('unlimitedTickets', e.target.checked);
+                              // If switching to unlimited, clear any maxTickets error
+                              if (e.target.checked && errors.maxTickets) {
+                                setErrors(prev => ({ ...prev, maxTickets: '' }));
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-yellow-500 focus:ring-2 focus:ring-yellow-500"
+                          />
+                          <span className="text-sm text-slate-400">Unlimited</span>
+                        </label>
+                      </div>
                       <input
                         type="number"
                         value={formData.maxTickets}
                         onChange={(e) => updateFormData('maxTickets', Number(e.target.value))}
+                        disabled={formData.unlimitedTickets}
+                        placeholder={formData.unlimitedTickets ? 'Up to total supply' : 'Enter max tickets'}
                         className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 ${
+                          formData.unlimitedTickets ? 'opacity-50 cursor-not-allowed' : ''
+                        } ${
                           errors.maxTickets ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
                       />
                       {errors.maxTickets && <p className="text-red-400 text-xs mt-1">{errors.maxTickets}</p>}
+                      {formData.unlimitedTickets && (
+                        <p className="text-yellow-400 text-xs mt-1">
+                          ℹ️ Tickets available: up to {formData.totalSupply.toLocaleString()} (total supply)
+                        </p>
+                      )}
                     </div>
 
                     <div>
@@ -2000,7 +2041,9 @@ export default function CreateRafflePage() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Max Tickets:</span>
-                          <span className="text-white">{formData.maxTickets.toLocaleString()}</span>
+                          <span className="text-white">
+                            {formData.unlimitedTickets ? `Unlimited (up to ${formData.totalSupply.toLocaleString()})` : formData.maxTickets.toLocaleString()}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">Duration:</span>
@@ -2021,7 +2064,7 @@ export default function CreateRafflePage() {
                         <p className="font-medium mb-1">Launch Summary:</p>
                         <ul className="space-y-1 text-yellow-200/80">
                           <li>• Raffle will run for {formData.raffleDuration} hours</li>
-                          <li>• {formData.winnerCount} winners will be selected from {formData.maxTickets} tickets</li>
+                          <li>• {formData.winnerCount} winners will be selected from {formData.unlimitedTickets ? `unlimited tickets (up to ${formData.totalSupply.toLocaleString()})` : `${formData.maxTickets} tickets`}</li>
                           <li>• Each ticket costs {formData.ticketPrice} SOL</li>
                           <li>• Launch fee: 0.005 SOL + transaction costs</li>
                         </ul>

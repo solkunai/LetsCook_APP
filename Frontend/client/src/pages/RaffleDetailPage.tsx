@@ -35,15 +35,20 @@ import {
 } from 'lucide-react';
 import { ipfsMetadataService } from '@/lib/ipfsMetadataService';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
+import { getConnectionWithTimeout } from '@/lib/connection';
 import { useLocation, useRoute } from 'wouter';
 import { toast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { raffleService } from '@/lib/raffleService';
 import { blockchainIntegrationService } from '@/lib/blockchainIntegrationService';
 import { raffleBlockchainService } from '@/lib/raffleBlockchainService';
+import { tradingService } from '@/lib/tradingService';
 import VotingComponent from '@/components/VotingComponent';
 import MarketMakingRewards from '@/components/MarketMakingRewards';
+import { marketDataService } from '@/lib/marketDataService';
+import { launchDataService } from '@/lib/launchDataService';
+import { Badge } from '@/components/ui/badge';
 
 interface RaffleData {
   id: string;
@@ -97,16 +102,35 @@ export default function RaffleDetailPage() {
   const [copied, setCopied] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  
+  // Ticket status state
+  const [ticketStatus, setTicketStatus] = useState<{
+    hasTickets: boolean;
+    numTickets: number;
+    isWinner: boolean;
+    canClaim: boolean;
+    canRefund: boolean;
+    orderId?: string;
+  } | null>(null);
+  const [isCheckingTickets, setIsCheckingTickets] = useState(false);
+  const [isClaimingTokens, setIsClaimingTokens] = useState(false);
+  const [isClaimingRefund, setIsClaimingRefund] = useState(false);
+  const [raffleFailed, setRaffleFailed] = useState(false); // Track if raffle failed (ended without completing)
+  
+  // Raffle graduation state
+  const [isGraduated, setIsGraduated] = useState(false);
+  const [marketData, setMarketData] = useState<{
+    price: number;
+    marketCap: number;
+    liquidity: number;
+    volume24h: number;
+    priceChange24h: number;
+  } | null>(null);
+  const [dexProvider, setDexProvider] = useState<'cook' | 'raydium' | null>(null);
+  const [isLoadingMarketData, setIsLoadingMarketData] = useState(false);
 
-  // Connection to devnet with better timeout settings
-  const connection = new Connection('https://api.devnet.solana.com', {
-    commitment: 'confirmed',
-    confirmTransactionInitialTimeout: 60000,
-    disableRetryOnRateLimit: false,
-    httpHeaders: {
-      'Content-Type': 'application/json',
-    },
-  });
+  // Connection using environment variable
+  const connection = getConnectionWithTimeout('confirmed', 60000);
 
   useEffect(() => {
     if (raffleId) {
@@ -124,8 +148,19 @@ export default function RaffleDetailPage() {
   useEffect(() => {
     if (connected && publicKey && raffleData) {
       fetchUserTickets();
+      fetchTicketStatus();
     }
   }, [connected, publicKey, raffleData]);
+
+  // Check graduation status periodically
+  useEffect(() => {
+    if (raffleData && !isGraduated && (raffleData.status === 'ended' || raffleData.status === 'completed')) {
+      const interval = setInterval(() => {
+        checkGraduationStatus(raffleData);
+      }, 30000); // Check every 30 seconds
+      return () => clearInterval(interval);
+    }
+  }, [raffleData, isGraduated]);
 
   const fetchRaffleData = async () => {
     try {
@@ -149,8 +184,108 @@ export default function RaffleDetailPage() {
       }
       
       if (raffleData) {
+        // PRIORITY 1: Fetch name, symbol, image directly from Supabase (fastest - no IPFS fetch needed)
+        // PRIORITY 2: Fetch from IPFS metadata URI if Supabase doesn't have direct values
+        // PRIORITY 3: Use blockchain-parsed data as last resort
+        try {
+          const { LaunchMetadataService } = await import('@/lib/launchMetadataService');
+          const metadata = await LaunchMetadataService.getMetadata(raffleId);
+          
+          if (metadata) {
+            // PRIORITY: Use name, symbol, image directly from Supabase (fastest access)
+            if (metadata.name) {
+              raffleData.name = metadata.name;
+              console.log('✅ Loaded token name from Supabase (fastest):', metadata.name);
+            }
+            if (metadata.symbol) {
+              raffleData.symbol = metadata.symbol;
+              console.log('✅ Loaded token symbol from Supabase (fastest):', metadata.symbol);
+            }
+            if (metadata.image) {
+              raffleData.image = metadata.image;
+              console.log('✅ Loaded token image from Supabase (fastest):', metadata.image);
+            }
+            
+            // Merge other Supabase metadata with raffle data
+            if (metadata.description) {
+              raffleData.description = metadata.description;
+            }
+            if (metadata.website) {
+              raffleData.website = metadata.website;
+            }
+            if (metadata.twitter) {
+              raffleData.twitter = metadata.twitter;
+            }
+            if (metadata.telegram) {
+              raffleData.telegram = metadata.telegram;
+            }
+            if (metadata.discord) {
+              raffleData.discord = metadata.discord;
+            }
+            
+            // PRIORITY 2: Fetch from IPFS metadata URI if Supabase doesn't have direct values
+            const needsIPFSFetch = !raffleData.name || !raffleData.symbol || !raffleData.image;
+            const metadataUri = metadata.metadata_uri;
+            
+            if (needsIPFSFetch && metadataUri) {
+              console.log(`📥 Fetching missing metadata from IPFS (fallback):`, metadataUri);
+              try {
+                const { getFullTokenMetadata } = await import('@/lib/ipfsMetadataFetcher');
+                const fullMetadata = await getFullTokenMetadata(metadataUri);
+                
+                if (fullMetadata) {
+                  // Only update if Supabase didn't provide the value
+                  if (!raffleData.name && fullMetadata.name) {
+                    raffleData.name = fullMetadata.name;
+                    console.log('✅ Fetched token name from IPFS (fallback):', fullMetadata.name);
+                  }
+                  if (!raffleData.symbol && fullMetadata.symbol) {
+                    raffleData.symbol = fullMetadata.symbol;
+                    console.log('✅ Fetched token symbol from IPFS (fallback):', fullMetadata.symbol);
+                  }
+                  if (!raffleData.image && fullMetadata.image) {
+                    raffleData.image = fullMetadata.image;
+                    console.log('✅ Fetched token image from IPFS (fallback):', fullMetadata.image);
+                  }
+                  if (fullMetadata.description && !raffleData.description) {
+                    raffleData.description = fullMetadata.description;
+                  }
+                }
+              } catch (ipfsError) {
+                console.warn('⚠️ Could not fetch metadata from IPFS (will use blockchain data as fallback):', ipfsError);
+              }
+            } else if (!needsIPFSFetch) {
+              console.log('✅ All metadata (name, symbol, image) loaded from Supabase - skipping IPFS fetch');
+            } else {
+              console.log('ℹ️ No IPFS metadata URI found in Supabase, using blockchain data');
+            }
+          }
+        } catch (metadataError) {
+          console.warn('⚠️ Could not load metadata from Supabase:', metadataError);
+          // Continue without Supabase metadata - not critical
+        }
+        
         setRaffleData(raffleData);
         console.log('✅ Raffle data fetched successfully:', raffleData);
+        
+        // Check if raffle failed (ended without completing - not all tickets sold)
+        const now = Date.now();
+        const hasEnded = raffleData.status === 'ended' || raffleData.status === 'completed' || now > raffleData.endTime;
+        const isIncomplete = raffleData.soldTickets < raffleData.maxTickets;
+        const failed = hasEnded && isIncomplete && raffleData.status !== 'completed';
+        setRaffleFailed(failed);
+        
+        console.log('📊 Raffle status check:', {
+          status: raffleData.status,
+          hasEnded,
+          isIncomplete,
+          soldTickets: raffleData.soldTickets,
+          maxTickets: raffleData.maxTickets,
+          failed
+        });
+        
+        // Check if raffle has graduated (is tradable and pool exists)
+        await checkGraduationStatus(raffleData);
         
         // Preload images for better UX
         try {
@@ -168,6 +303,68 @@ export default function RaffleDetailPage() {
       setRaffleData(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Check if raffle has graduated to trading
+  const checkGraduationStatus = async (raffle: RaffleData) => {
+    try {
+      setIsLoadingMarketData(true);
+      
+      // Get launch data to check is_tradable flag and DEX provider
+      const launch = await launchDataService.getLaunchById(raffle.id);
+      if (!launch) {
+        console.log('⚠️ Launch data not found for raffle:', raffle.id);
+        setIsLoadingMarketData(false);
+        return;
+      }
+
+      // Check if raffle is tradable (graduated)
+      // For raffles, we check if market data exists (pool created)
+      if (launch.baseTokenMint) {
+        try {
+          const marketDataResult = await marketDataService.getMarketData(
+            launch.baseTokenMint,
+            raffle.totalSupply
+          );
+          
+          // If market data exists and has price/liquidity, raffle has graduated
+          if (marketDataResult && marketDataResult.price > 0 && marketDataResult.liquidity > 0) {
+            setIsGraduated(true);
+            setMarketData({
+              price: marketDataResult.price,
+              marketCap: marketDataResult.marketCap,
+              liquidity: marketDataResult.liquidity,
+              volume24h: marketDataResult.volume24h,
+              priceChange24h: marketDataResult.priceChange24h
+            });
+            
+            // Set DEX provider (from launch data)
+            setDexProvider(launch.dexProvider === 1 ? 'raydium' : 'cook');
+            
+            console.log('✅ Raffle has graduated!', {
+              price: marketDataResult.price,
+              liquidity: marketDataResult.liquidity,
+              dexProvider: launch.dexProvider === 1 ? 'raydium' : 'cook'
+            });
+          } else {
+            setIsGraduated(false);
+            setMarketData(null);
+            console.log('ℹ️ Raffle has not graduated yet (pool not created)');
+          }
+        } catch (error) {
+          // Pool doesn't exist yet or error fetching
+          console.log('ℹ️ Pool not found yet or error fetching market data:', error);
+          setIsGraduated(false);
+          setMarketData(null);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error checking graduation status:', error);
+      setIsGraduated(false);
+      setMarketData(null);
+    } finally {
+      setIsLoadingMarketData(false);
     }
   };
 
@@ -259,6 +456,21 @@ export default function RaffleDetailPage() {
       return;
     }
 
+    // Check if user already has tickets
+    try {
+      const ticketStatus = await tradingService.getUserTicketStatus(raffleData.id, publicKey.toBase58());
+      if (ticketStatus.hasTickets) {
+        toast({
+          title: "Tickets Already Purchased",
+          description: `You have already purchased ${ticketStatus.numTickets} ticket(s) for this raffle. Order ID: ${ticketStatus.orderId}`,
+          variant: "destructive",
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking ticket status:', error);
+    }
+
     setIsBuyingTickets(true);
 
     try {
@@ -306,6 +518,61 @@ export default function RaffleDetailPage() {
     }
   };
 
+  const fetchTicketStatus = async () => {
+    if (!publicKey || !raffleData) return;
+    
+    try {
+      const status = await tradingService.getUserTicketStatus(raffleData.id, publicKey.toBase58());
+      setTicketStatus(status);
+    } catch (error) {
+      console.error('Error fetching ticket status:', error);
+    }
+  };
+
+  const handleCheckTickets = async () => {
+    if (!connected || !publicKey || !signTransaction || !raffleData) {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet to check tickets.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCheckingTickets(true);
+
+    try {
+      const result = await tradingService.checkTickets(
+        raffleData.id,
+        publicKey.toBase58(),
+        signTransaction
+      );
+
+      if (result.success) {
+        toast({
+          title: result.isWinner ? "🎉 Congratulations!" : "😔 Better Luck Next Time",
+          description: result.isWinner 
+            ? `You won with ${result.winningTickets} winning ticket(s)! Click "Claim Tokens" to claim your prize.`
+            : "You didn't win this time. Click 'Claim Refund' to get your SOL back.",
+        });
+        
+        // Refresh ticket status
+        await fetchTicketStatus();
+      } else {
+        throw new Error(result.error || 'Failed to check tickets');
+      }
+    } catch (error) {
+      console.error('Error checking tickets:', error);
+      toast({
+        title: "Check Failed",
+        description: error instanceof Error ? error.message : "Failed to check tickets. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCheckingTickets(false);
+    }
+  };
+
   const handleClaimTokens = async () => {
     if (!connected || !publicKey || !signTransaction || !raffleData) {
       toast({
@@ -316,11 +583,10 @@ export default function RaffleDetailPage() {
       return;
     }
 
+    setIsClaimingTokens(true);
+
     try {
-      setLoading(true);
-      
-      // Use real blockchain transaction to claim tokens
-      const result = await raffleService.claimTokens(
+      const result = await tradingService.claimTokens(
         raffleData.id,
         publicKey.toBase58(),
         signTransaction
@@ -328,18 +594,14 @@ export default function RaffleDetailPage() {
 
       if (result.success) {
         toast({
-          title: "Tokens Claimed!",
-          description: `Successfully claimed ${result.tokenAmount} tokens.`,
+          title: "🎉 Tokens Claimed!",
+          description: `Successfully claimed ${result.tokenAmount} tokens. The token is now tradeable!`,
         });
         
-        // Refresh user tickets
-        await fetchUserTickets();
+        // Refresh ticket status
+        await fetchTicketStatus();
       } else {
-        toast({
-          title: "Claim Failed",
-          description: result.error || "Failed to claim tokens.",
-          variant: "destructive",
-        });
+        throw new Error(result.error || 'Failed to claim tokens');
       }
     } catch (error) {
       console.error('Error claiming tokens:', error);
@@ -349,7 +611,7 @@ export default function RaffleDetailPage() {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setIsClaimingTokens(false);
     }
   };
 
@@ -363,11 +625,10 @@ export default function RaffleDetailPage() {
       return;
     }
 
+    setIsClaimingRefund(true);
+
     try {
-      setLoading(true);
-      
-      // Use real blockchain transaction to claim refund
-      const result = await raffleService.claimRefund(
+      const result = await tradingService.claimRefund(
         raffleData.id,
         publicKey.toBase58(),
         signTransaction
@@ -375,18 +636,14 @@ export default function RaffleDetailPage() {
 
       if (result.success) {
         toast({
-          title: "Refund Claimed!",
+          title: "💰 Refund Claimed!",
           description: `Successfully claimed ${result.refundAmount} SOL refund.`,
         });
         
-        // Refresh user tickets
-        await fetchUserTickets();
+        // Refresh ticket status
+        await fetchTicketStatus();
       } else {
-        toast({
-          title: "Refund Failed",
-          description: result.error || "Failed to claim refund.",
-          variant: "destructive",
-        });
+        throw new Error(result.error || 'Failed to claim refund');
       }
     } catch (error) {
       console.error('Error claiming refund:', error);
@@ -396,7 +653,7 @@ export default function RaffleDetailPage() {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setIsClaimingRefund(false);
     }
   };
 
@@ -418,7 +675,8 @@ export default function RaffleDetailPage() {
     setShowShareModal(true);
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string, failed: boolean) => {
+    if (failed) return 'text-red-400 bg-red-500/20';
     switch (status) {
       case 'upcoming': return 'text-blue-400 bg-blue-500/20';
       case 'active': return 'text-green-400 bg-green-500/20';
@@ -428,7 +686,8 @@ export default function RaffleDetailPage() {
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string, failed: boolean) => {
+    if (failed) return 'Failed';
     switch (status) {
       case 'upcoming': return 'Upcoming';
       case 'active': return 'Active';
@@ -529,8 +788,8 @@ export default function RaffleDetailPage() {
             
             {/* Status Badge */}
             <div className="absolute bottom-6 left-6">
-              <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(raffleData.status)} backdrop-blur-sm bg-black/20`}>
-                {getStatusText(raffleData.status)}
+              <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(raffleData.status, raffleFailed)} backdrop-blur-sm bg-black/20`}>
+                {getStatusText(raffleData.status, raffleFailed)}
               </div>
             </div>
             
@@ -735,9 +994,23 @@ export default function RaffleDetailPage() {
                 <div className="grid md:grid-cols-2 gap-8">
                   <div className="space-y-4">
                     <div className="flex justify-between items-center py-2 border-b border-slate-700">
-                      <span className="text-slate-400">Ticket Price</span>
-                      <span className="text-white font-semibold">{raffleData.ticketPrice} SOL</span>
+                      <span className="text-slate-400">
+                        {isGraduated && marketData ? 'Current Price' : 'Ticket Price'}
+                      </span>
+                      <span className="text-white font-semibold">
+                        {isGraduated && marketData 
+                          ? `${marketData.price.toFixed(8)} SOL`
+                          : `${raffleData.ticketPrice.toFixed(6)} SOL`}
+                      </span>
                     </div>
+                    {isGraduated && marketData && (
+                      <div className="flex justify-between items-center py-2 border-b border-slate-700">
+                        <span className="text-slate-400">Price Source</span>
+                        <Badge variant="outline" className="border-green-500/30 text-green-400">
+                          {dexProvider === 'raydium' ? 'Raydium' : 'Cook DEX'} Pool
+                        </Badge>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center py-2 border-b border-slate-700">
                       <span className="text-slate-400">Max Tickets</span>
                       <span className="text-white font-semibold">{raffleData.maxTickets.toLocaleString()}</span>
@@ -890,8 +1163,169 @@ export default function RaffleDetailPage() {
                 </div>
               )}
 
-              {/* Claim/Refund Section */}
-              {(raffleData.status === 'ended' || raffleData.status === 'completed') && connected && (
+              {/* Raffle Failed - Refund Section */}
+              {raffleFailed && connected && (
+                <div className="bg-slate-900 rounded-2xl border border-red-500/30 p-6">
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center">
+                    <AlertCircle className="w-5 h-5 mr-2 text-red-400" />
+                    Raffle Failed
+                  </h3>
+                  
+                  <div className="space-y-4">
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+                      <div className="text-red-400 font-semibold mb-2">⚠️ Raffle Did Not Complete</div>
+                      <div className="text-white text-sm mb-3">
+                        This raffle ended without selling all tickets ({raffleData.soldTickets} / {raffleData.maxTickets} sold).
+                        All participants are eligible for a full refund.
+                      </div>
+                    </div>
+                    
+                    {ticketStatus && ticketStatus.hasTickets ? (
+                      <>
+                        <div className="bg-slate-800 rounded-lg p-4">
+                          <div className="text-sm text-slate-400 mb-1">Your Tickets</div>
+                          <div className="text-white font-semibold text-lg">{ticketStatus.numTickets} ticket(s)</div>
+                          <div className="text-sm text-slate-400 mt-2">
+                            Refund Amount: {(ticketStatus.numTickets || 0) * raffleData.ticketPrice} SOL
+                          </div>
+                        </div>
+                        
+                        <button
+                          onClick={handleClaimRefund}
+                          disabled={isClaimingRefund}
+                          className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                        >
+                          {isClaimingRefund ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                              Claiming Refund...
+                            </>
+                          ) : (
+                            <>
+                              <DollarSign className="w-4 h-4 mr-2" />
+                              Claim Full Refund
+                            </>
+                          )}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="text-slate-400 text-sm text-center py-4">
+                        You don't have any tickets for this raffle.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Ticket Status & Results Section - Only show if raffle completed successfully */}
+              {!raffleFailed && (raffleData.status === 'ended' || raffleData.status === 'completed') && connected && ticketStatus && (
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center">
+                    <Award className="w-5 h-5 mr-2 text-purple-400" />
+                    Your Ticket Status
+                  </h3>
+                  
+                  <div className="space-y-4">
+                    {/* Order ID */}
+                    {ticketStatus.orderId && (
+                      <div className="bg-slate-800 rounded-lg p-4">
+                        <div className="text-sm text-slate-400 mb-1">Order ID</div>
+                        <div className="text-white font-mono text-xs break-all">{ticketStatus.orderId}</div>
+                      </div>
+                    )}
+                    
+                    {/* Ticket Count */}
+                    <div className="bg-slate-800 rounded-lg p-4">
+                      <div className="text-sm text-slate-400 mb-1">Your Tickets</div>
+                      <div className="text-white font-semibold text-lg">{ticketStatus.numTickets} ticket(s)</div>
+                    </div>
+                    
+                    {/* Check Tickets Button (if not checked yet) */}
+                    {ticketStatus.hasTickets && !ticketStatus.isWinner && ticketStatus.canRefund === false && (
+                      <button
+                        onClick={handleCheckTickets}
+                        disabled={isCheckingTickets}
+                        className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                      >
+                        {isCheckingTickets ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                            Checking Tickets...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Check Tickets
+                          </>
+                        )}
+                      </button>
+                    )}
+                    
+                    {/* Winner Display */}
+                    {ticketStatus.isWinner && (
+                      <div className="bg-gradient-to-r from-green-900/50 to-emerald-900/50 rounded-lg p-4 border border-green-500/30">
+                        <div className="flex items-center mb-2">
+                          <Award className="w-6 h-6 text-green-400 mr-2" />
+                          <div className="text-green-400 font-bold text-lg">🎉 YOU WON!</div>
+                        </div>
+                        <div className="text-white text-sm mb-3">
+                          Congratulations! You are a winner. Claim your tokens now!
+                        </div>
+                        <button
+                          onClick={handleClaimTokens}
+                          disabled={isClaimingTokens}
+                          className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                        >
+                          {isClaimingTokens ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                              Claiming Tokens...
+                            </>
+                          ) : (
+                            <>
+                              <Gift className="w-4 h-4 mr-2" />
+                              Claim Tokens
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* Loser Display */}
+                    {ticketStatus.hasTickets && !ticketStatus.isWinner && ticketStatus.canRefund && (
+                      <div className="bg-gradient-to-r from-orange-900/50 to-red-900/50 rounded-lg p-4 border border-orange-500/30">
+                        <div className="flex items-center mb-2">
+                          <AlertCircle className="w-6 h-6 text-orange-400 mr-2" />
+                          <div className="text-orange-400 font-bold text-lg">😔 Better Luck Next Time</div>
+                        </div>
+                        <div className="text-white text-sm mb-3">
+                          You didn't win this time. Click below to claim your refund.
+                        </div>
+                        <button
+                          onClick={handleClaimRefund}
+                          disabled={isClaimingRefund}
+                          className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                        >
+                          {isClaimingRefund ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                              Claiming Refund...
+                            </>
+                          ) : (
+                            <>
+                              <DollarSign className="w-4 h-4 mr-2" />
+                              Claim Refund
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Claim/Refund Section (Legacy - if no ticket status) - Only for completed raffles */}
+              {!raffleFailed && (raffleData.status === 'ended' || raffleData.status === 'completed') && connected && !ticketStatus && (
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
                   <h3 className="text-lg font-bold text-white mb-4 flex items-center">
                     <Award className="w-5 h-5 mr-2 text-green-400" />
@@ -911,10 +1345,10 @@ export default function RaffleDetailPage() {
                     <div className="flex space-x-3">
                       <button
                         onClick={handleClaimTokens}
-                        disabled={loading}
+                        disabled={isClaimingTokens}
                         className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-600/50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
                       >
-                        {loading ? (
+                        {isClaimingTokens ? (
                           <Loader2 className="w-4 h-4 animate-spin mr-2" />
                         ) : (
                           <Award className="w-4 h-4 mr-2" />
@@ -924,10 +1358,10 @@ export default function RaffleDetailPage() {
                       
                       <button
                         onClick={handleClaimRefund}
-                        disabled={loading}
+                        disabled={isClaimingRefund}
                         className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-600/50 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
                       >
-                        {loading ? (
+                        {isClaimingRefund ? (
                           <Loader2 className="w-4 h-4 animate-spin mr-2" />
                         ) : (
                           <RefreshCw className="w-4 h-4 mr-2" />
@@ -1027,39 +1461,136 @@ export default function RaffleDetailPage() {
                 </div>
               )}
 
-              {/* Token Metrics - Only show after raffle graduates */}
-              {raffleData.status === 'completed' && (
+              {/* Raffle Graduation Status */}
+              {(raffleData.status === 'ended' || raffleData.status === 'completed') && !raffleFailed && (
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-                  <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-                    <TrendingUp className="w-5 h-5 mr-2 text-blue-400" />
-                    Token Metrics
-                  </h3>
-                  
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Market Cap:</span>
-                      <span className="text-white font-semibold">${raffleData.marketCap.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Liquidity:</span>
-                      <span className="text-white font-semibold">${raffleData.liquidity.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">24h Volume:</span>
-                      <span className="text-white font-semibold">${raffleData.volume24h.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Holders:</span>
-                      <span className="text-white font-semibold">{raffleData.holders}</span>
-                    </div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-white flex items-center">
+                      <Zap className="w-5 h-5 mr-2 text-yellow-400" />
+                      Trading Status
+                    </h3>
+                    {isLoadingMarketData && (
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                    )}
                   </div>
                   
-                  {/* Trading Notice */}
-                  <div className="mt-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-                    <p className="text-green-400 text-sm">
-                      🎉 This raffle has graduated! Tokens are now tradeable on the AMM.
-                    </p>
-                  </div>
+                  {isGraduated && marketData ? (
+                    <>
+                      {/* Graduation Success Badge */}
+                      <div className="mb-4 p-4 bg-gradient-to-r from-green-500/10 to-blue-500/10 border border-green-500/20 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <CheckCircle2 className="w-5 h-5 text-green-400" />
+                            <span className="text-green-400 font-semibold text-lg">Graduated to Trading</span>
+                          </div>
+                          <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                            {dexProvider === 'raydium' ? 'Raydium' : 'Cook DEX'}
+                          </Badge>
+                        </div>
+                        <p className="text-green-200/80 text-sm mt-2">
+                          This raffle has successfully graduated! Tokens are now tradeable on {dexProvider === 'raydium' ? 'Raydium' : 'Cook DEX'}.
+                        </p>
+                      </div>
+
+                      {/* Market Data */}
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center py-2 border-b border-slate-700">
+                          <span className="text-slate-400">Current Price:</span>
+                          <span className="text-white font-bold text-xl">
+                            {marketData.price.toFixed(8)} SOL
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Market Cap:</span>
+                          <span className="text-white font-semibold">
+                            ${marketData.marketCap.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Liquidity:</span>
+                          <span className="text-white font-semibold">
+                            ${marketData.liquidity.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">24h Volume:</span>
+                          <span className="text-white font-semibold">
+                            ${marketData.volume24h.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">24h Price Change:</span>
+                          <span className={`font-semibold ${
+                            marketData.priceChange24h >= 0 ? 'text-green-400' : 'text-red-400'
+                          }`}>
+                            {marketData.priceChange24h >= 0 ? '+' : ''}{marketData.priceChange24h.toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">DEX Provider:</span>
+                          <Badge variant="outline" className="border-yellow-500/30 text-yellow-400">
+                            {dexProvider === 'raydium' ? 'Raydium' : 'Cook DEX'}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      {/* Trading Link */}
+                      <div className="mt-4 pt-4 border-t border-slate-700">
+                        <button
+                          onClick={() => setLocation(`/trade?token=${raffleData.id}`)}
+                          className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-black font-semibold py-3 px-4 rounded-lg transition-all flex items-center justify-center"
+                        >
+                          <TrendingUp className="w-4 h-4 mr-2" />
+                          Trade on {dexProvider === 'raydium' ? 'Raydium' : 'Cook DEX'}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Not Graduated Yet */}
+                      <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <Clock className="w-5 h-5 text-yellow-400" />
+                          <span className="text-yellow-400 font-semibold">Awaiting Graduation</span>
+                        </div>
+                        <p className="text-yellow-200/80 text-sm mt-2">
+                          {raffleData.status === 'ended' 
+                            ? 'Raffle has ended. Pool will be created automatically when liquidity threshold is met and first winner claims tokens.'
+                            : 'Pool will be created automatically when liquidity threshold is met after raffle ends.'}
+                        </p>
+                      </div>
+
+                      {/* Current Ticket Price (Before Graduation) */}
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center py-2 border-b border-slate-700">
+                          <span className="text-slate-400">Ticket Price:</span>
+                          <span className="text-white font-bold text-xl">
+                            {raffleData.ticketPrice.toFixed(6)} SOL
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Status:</span>
+                          <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                            <Clock className="w-3 h-3 mr-1" />
+                            Pre-Graduation
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Sold Tickets:</span>
+                          <span className="text-white font-semibold">
+                            {raffleData.soldTickets.toLocaleString()} / {raffleData.maxTickets > 0 ? raffleData.maxTickets.toLocaleString() : 'Unlimited'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Info Notice */}
+                      <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                        <p className="text-blue-400 text-xs">
+                          💡 Once winners claim their tokens and the liquidity threshold is met, a liquidity pool will be created automatically on the selected DEX (Cook DEX or Raydium). The token price will then be determined by the AMM pool.
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

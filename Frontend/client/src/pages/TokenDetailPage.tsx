@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useToast } from '@/hooks/use-toast';
+import { launchDataService } from '@/lib/launchDataService';
+import { marketDataService } from '@/lib/marketDataService';
 import { PieChart as RechartsPieChart, Cell, ResponsiveContainer, Pie, Tooltip, Legend } from 'recharts';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer as LineResponsiveContainer } from 'recharts';
 import Header from '@/components/Header';
@@ -58,7 +60,7 @@ interface TokenData {
 
 export default function TokenDetailPage() {
   const { tokenId } = useParams();
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, signTransaction } = useWallet();
   const { toast } = useToast();
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -66,47 +68,72 @@ export default function TokenDetailPage() {
   const [sellAmount, setSellAmount] = useState('');
   const [isTrading, setIsTrading] = useState(false);
 
-  // Mock data - replace with real API calls
+  // Fetch real token data from blockchain
   useEffect(() => {
-    const mockTokenData: TokenData = {
-      id: tokenId || '1',
-      name: 'Chef Token',
-      symbol: 'CHEF',
-      price: 0.000123,
-      priceChange24h: 12.5,
-      volume24h: 1250000,
-      marketCap: 12300000,
-      totalSupply: 1000000000,
-      circulatingSupply: 500000000,
-      holders: 1250,
-      liquidity: 250000,
-      distribution: [
-        { name: 'Liquidity Pool', value: 40, color: '#8884d8' },
-        { name: 'Team', value: 20, color: '#82ca9d' },
-        { name: 'Marketing', value: 15, color: '#ffc658' },
-        { name: 'Airdrops', value: 10, color: '#ff7300' },
-        { name: 'Reserve', value: 15, color: '#00ff00' }
-      ],
-      priceHistory: [
-        { time: '00:00', price: 0.000100 },
-        { time: '04:00', price: 0.000105 },
-        { time: '08:00', price: 0.000110 },
-        { time: '12:00', price: 0.000115 },
-        { time: '16:00', price: 0.000120 },
-        { time: '20:00', price: 0.000123 }
-      ],
-      description: 'Chef Token is a revolutionary memecoin built on Solana, designed to bring the cooking community together through fair launches and community governance.',
-      website: 'https://cheftoken.com',
-      twitter: '@cheftoken',
-      telegram: 'https://t.me/cheftoken',
-      discord: 'https://discord.gg/cheftoken'
+    const fetchTokenData = async () => {
+      if (!tokenId) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        
+        // Get launch data by token mint
+        const launch = await launchDataService.getLaunchByTokenMint(tokenId);
+        
+        if (!launch) {
+          setTokenData(null);
+          setIsLoading(false);
+          return;
+        }
+
+        // Get market data
+        const marketData = await marketDataService.getMarketData(tokenId, launch.totalSupply);
+        
+        // Get price history
+        const priceHistory = await marketDataService.getPriceHistory(tokenId, '24h');
+        
+        const tokenData: TokenData = {
+          id: launch.id,
+          name: launch.name,
+          symbol: launch.symbol,
+          price: marketData.price,
+          priceChange24h: marketData.priceChange24h,
+          volume24h: marketData.volume24h,
+          marketCap: marketData.marketCap,
+          totalSupply: launch.totalSupply,
+          circulatingSupply: launch.totalSupply - (marketData.liquidity / 2 / marketData.price || 0),
+          holders: 0, // Removed as per user request
+          liquidity: marketData.liquidity,
+          distribution: [], // Would need to calculate from launch data
+          priceHistory: priceHistory.map((point) => ({
+            time: new Date(point.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            price: point.price
+          })),
+          description: launch.description || '',
+          website: launch.website || '',
+          twitter: launch.twitter || '',
+          telegram: launch.telegram || '',
+          discord: launch.discord || ''
+        };
+        
+        setTokenData(tokenData);
+      } catch (error) {
+        console.error('Error fetching token data:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load token data",
+          variant: "destructive"
+        });
+        setTokenData(null);
+      } finally {
+        setIsLoading(false);
+      }
     };
-    
-    setTimeout(() => {
-      setTokenData(mockTokenData);
-      setIsLoading(false);
-    }, 1000);
-  }, [tokenId]);
+
+    fetchTokenData();
+  }, [tokenId, toast]);
 
   const handleBuy = async () => {
     if (!connected) {
@@ -118,14 +145,32 @@ export default function TokenDetailPage() {
       return;
     }
 
+    if (!publicKey || !tokenData) return;
+    
     setIsTrading(true);
     try {
-      // Real trading logic would go here
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
+      // Use real trading service
+      const { tradingService } = await import('@/lib/tradingService');
+      
+      if (!signTransaction) {
+        throw new Error('Wallet signTransaction not available');
+      }
+      
+      const result = await tradingService.buyTokensAMM(
+        tokenId,
+        publicKey.toBase58(),
+        parseFloat(buyAmount),
+        signTransaction,
+        'cook'
+      );
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Buy failed');
+      }
       
       toast({
         title: "Buy Order Executed",
-        description: `Successfully bought ${buyAmount} ${tokenData?.symbol} tokens.`,
+        description: `Successfully bought ${buyAmount} ${tokenData.symbol} tokens.`,
       });
       setBuyAmount('');
     } catch (error) {
@@ -149,14 +194,32 @@ export default function TokenDetailPage() {
       return;
     }
 
+    if (!publicKey || !tokenData) return;
+    
     setIsTrading(true);
     try {
-      // Real trading logic would go here
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
+      // Use real trading service
+      const { tradingService } = await import('@/lib/tradingService');
+      
+      if (!signTransaction) {
+        throw new Error('Wallet signTransaction not available');
+      }
+      
+      const result = await tradingService.sellTokensAMM(
+        tokenId,
+        publicKey.toBase58(),
+        parseFloat(sellAmount),
+        signTransaction,
+        'cook'
+      );
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Sell failed');
+      }
       
       toast({
         title: "Sell Order Executed",
-        description: `Successfully sold ${sellAmount} ${tokenData?.symbol} tokens.`,
+        description: `Successfully sold ${sellAmount} ${tokenData.symbol} tokens.`,
       });
       setSellAmount('');
     } catch (error) {

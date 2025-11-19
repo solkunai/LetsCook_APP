@@ -29,7 +29,7 @@ import Header from '@/components/Header';
 import { liquidityService, LiquidityPool, UserLiquidityPosition } from '@/lib/liquidityService';
 
 export default function LiquidityPage() {
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, signTransaction } = useWallet();
   const { toast } = useToast();
   const [pools, setPools] = useState<LiquidityPool[]>([]);
   const [userPositions, setUserPositions] = useState<UserLiquidityPosition[]>([]);
@@ -54,10 +54,10 @@ export default function LiquidityPage() {
     }
   }, [connected, publicKey]);
 
-  const loadLiquidityData = async () => {
+  const loadLiquidityData = async (forceRefresh: boolean = false) => {
     setIsLoading(true);
     try {
-      const poolsData = await liquidityService.getLiquidityPools();
+      const poolsData = await liquidityService.getLiquidityPools(forceRefresh);
       setPools(poolsData);
     } catch (error) {
       console.error('Error loading liquidity data:', error);
@@ -71,11 +71,11 @@ export default function LiquidityPage() {
     }
   };
 
-  const loadUserPositions = async () => {
+  const loadUserPositions = async (forceRefresh: boolean = false) => {
     if (!publicKey) return;
     
     try {
-      const positions = await liquidityService.getUserLiquidityPositions(publicKey);
+      const positions = await liquidityService.getUserLiquidityPositions(publicKey, forceRefresh);
       setUserPositions(positions);
     } catch (error) {
       console.error('Error loading user positions:', error);
@@ -83,7 +83,7 @@ export default function LiquidityPage() {
   };
 
   const handleAddLiquidity = async () => {
-    if (!connected) {
+    if (!connected || !publicKey || !signTransaction) {
       toast({
         title: "Wallet Not Connected",
         description: "Please connect your wallet to add liquidity.",
@@ -113,7 +113,8 @@ export default function LiquidityPage() {
         pool.tokenB.mint,
         parseFloat(addTokenA),
         parseFloat(addTokenB),
-        publicKey!
+        publicKey,
+        signTransaction
       );
       
       toast({
@@ -125,8 +126,8 @@ export default function LiquidityPage() {
       setAddTokenB('');
       setSelectedPool('');
       
-      // Refresh data
-      await loadUserPositions();
+      // Refresh data (force refresh after adding liquidity)
+      await loadUserPositions(true);
       
     } catch (error) {
       console.error('Add liquidity error:', error);
@@ -141,7 +142,7 @@ export default function LiquidityPage() {
   };
 
   const handleRemoveLiquidity = async (positionId: string) => {
-    if (!connected) {
+    if (!connected || !publicKey || !signTransaction) {
       toast({
         title: "Wallet Not Connected",
         description: "Please connect your wallet to remove liquidity.",
@@ -160,7 +161,8 @@ export default function LiquidityPage() {
         position.dexProvider,
         position.lpTokenMint,
         position.liquidity,
-        publicKey!
+        publicKey,
+        signTransaction
       );
       
       toast({
@@ -168,8 +170,8 @@ export default function LiquidityPage() {
         description: `Successfully removed liquidity from ${position.tokenA}/${position.tokenB} pool.`,
       });
       
-      // Refresh data
-      await loadUserPositions();
+      // Refresh data (force refresh after removing liquidity)
+      await loadUserPositions(true);
       
     } catch (error) {
       console.error('Remove liquidity error:', error);
@@ -220,7 +222,7 @@ export default function LiquidityPage() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={loadLiquidityData}
+                onClick={() => loadLiquidityData(true)}
                 disabled={isLoading}
               >
                 <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
@@ -328,7 +330,7 @@ export default function LiquidityPage() {
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  onClick={loadUserPositions}
+                  onClick={() => loadUserPositions(true)}
                 >
                   <RefreshCw className="w-4 h-4 mr-2" />
                   Refresh

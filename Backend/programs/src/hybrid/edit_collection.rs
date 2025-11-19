@@ -49,6 +49,8 @@ pub fn edit_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>],
         ctx.accounts.token_mint,
         ctx.accounts.team_token,
         ctx.accounts.token_program,
+        ctx.accounts.system_program,
+        ctx.accounts.associated_token,
     )?;
 
     utils::check_and_create_ata(
@@ -57,6 +59,8 @@ pub fn edit_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>],
         ctx.accounts.token_mint,
         ctx.accounts.cook_token,
         ctx.accounts.token_program,
+        ctx.accounts.system_program,
+        ctx.accounts.associated_token,
     )?;
 
     utils::create_user_data(ctx.accounts.user, ctx.accounts.user_data, program_id)?;

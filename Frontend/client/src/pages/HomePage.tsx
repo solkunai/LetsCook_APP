@@ -160,20 +160,42 @@ export default function HomePage() {
   };
 
   const refreshLaunches = async () => {
-    await fetchLaunches();
+    await fetchLaunches(true); // Force refresh
   };
 
-  const fetchLaunches = async () => {
+  const fetchLaunches = async (forceRefresh: boolean = false) => {
     try {
       setLoading(true);
-      const fetchedLaunches = await launchService.fetchAllLaunches();
+      console.log('🔄 Fetching launches...', forceRefresh ? '(force refresh)' : '');
+      
+      // If force refresh, clear cache first
+      if (forceRefresh) {
+        const { blockchainIntegrationService } = await import('@/lib/blockchainIntegrationService');
+        blockchainIntegrationService.clearCache();
+        localStorage.removeItem('blockchain_launches_cache');
+        console.log('🗑️ Cache cleared for force refresh');
+      }
+      
+      const fetchedLaunches = await launchService.fetchAllLaunches(forceRefresh);
+      console.log('✅ Fetched', fetchedLaunches.length, 'launches');
+      
+      if (fetchedLaunches.length === 0 && !forceRefresh) {
+        console.warn('⚠️ No launches found. Try force refresh or check console for errors.');
+        toast({
+          title: "No Launches Found",
+          description: "No launches found. Try refreshing or check if launches exist on the blockchain.",
+          variant: "default",
+        });
+      }
+      
       setLaunches(fetchedLaunches);
     } catch (error) {
+      console.error('❌ Error fetching launches:', error);
       setLaunches([]);
       toast({
-        title: "Error",
-        description: "Failed to fetch launches. Please try again.",
-        variant: "destructive",
+        title: "Oops! Something went wrong",
+        description: `Failed to fetch launches: ${error instanceof Error ? error.message : 'Unknown error'}. Check console for details.`,
+        variant: "default",
       });
     } finally {
       setLoading(false);
@@ -189,7 +211,7 @@ export default function HomePage() {
             <div className="flex items-center space-x-3">
               <div className="relative">
                 <img 
-                  src="/logo.jpg" 
+                  src="/logo.png" 
                   alt="Let's Cook Logo" 
                   className="w-10 h-10 object-contain"
                 />
@@ -264,9 +286,9 @@ export default function HomePage() {
                   className="mr-4"
                 >
                   <img 
-                    src="/logo.jpg" 
+                    src="/logo.png" 
                     alt="Let's Cook Logo" 
-                    className="w-16 h-16 md:w-20 md:h-20 lg:w-24 lg:h-24 object-contain"
+                    className="w-24 h-24 md:w-32 md:h-32 lg:w-40 lg:h-40 object-contain"
                   />
                 </motion.div>
                 <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold leading-tight">
@@ -321,70 +343,6 @@ export default function HomePage() {
                 </Button>
               </div>
 
-              {/* Secondary Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                <Button 
-                  size="lg" 
-                  variant="outline" 
-                  className="group relative overflow-hidden text-lg px-8 py-4 border-2 border-yellow-500/60 text-yellow-400 hover:bg-yellow-500/10 hover:text-yellow-300 font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-yellow-500/20 backdrop-blur-sm bg-white/5 hover:border-yellow-400"
-                  onClick={() => document.getElementById('launches')?.scrollIntoView({ behavior: 'smooth' })}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-yellow-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <span className="relative z-10 flex items-center">
-                    View Active Raffles
-                    <ArrowRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
-                  </span>
-                </Button>
-                <Button 
-                  size="lg" 
-                  variant="outline" 
-                  className="group relative overflow-hidden text-lg px-8 py-4 border-2 border-blue-500/60 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/20 backdrop-blur-sm bg-white/5 hover:border-blue-400"
-                  onClick={() => setLocation('/trending-raffles')}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <span className="relative z-10 flex items-center">
-                    <TrendingUp className="mr-2 h-5 w-5" />
-                    Trending Raffles
-                  </span>
-                </Button>
-                <Button 
-                  size="lg" 
-                  variant="outline" 
-                  className="group relative overflow-hidden text-lg px-8 py-4 border-2 border-green-500/60 text-green-400 hover:bg-green-500/10 hover:text-green-300 font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-green-500/20 backdrop-blur-sm bg-white/5 hover:border-green-400"
-                  onClick={() => setLocation('/trending-tokens')}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-green-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <span className="relative z-10 flex items-center">
-                    <BarChart3 className="mr-2 h-5 w-5" />
-                    Trending Tokens
-                  </span>
-                </Button>
-              </div>
-            </motion.div>
-
-            {/* Stats */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-2xl mx-auto pt-8"
-            >
-              <StatCard 
-                number={loading ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${(launches.reduce((sum, launch) => sum + launch.volume24h, 0) / 1000).toFixed(2)}K+`} 
-                label="Total Volume" 
-              />
-              <StatCard 
-                number={loading ? <Loader2 className="w-6 h-6 animate-spin" /> : `${launches.length}+`} 
-                label="Active Launches" 
-              />
-              <StatCard 
-                number={loading ? <Loader2 className="w-6 h-6 animate-spin" /> : `${launches.reduce((sum, launch) => sum + launch.participants, 0) / 1000}K+`} 
-                label="Active Users" 
-              />
-              <StatCard 
-                number="24/7" 
-                label="Support" 
-              />
             </motion.div>
           </div>
         </div>
@@ -904,6 +862,72 @@ function LaunchCard({
   const [, setLocation] = useLocation();
   const [imageError, setImageError] = useState(false);
   const [currentImageSrc, setCurrentImageSrc] = useState(launch.image);
+  const [launchName, setLaunchName] = useState(launch.name);
+  const [launchSymbol, setLaunchSymbol] = useState(launch.symbol);
+  
+  // PRIORITY 1: Fetch name, symbol, image directly from Supabase (fastest - no IPFS fetch needed)
+  // PRIORITY 2: Fetch from IPFS metadata URI if Supabase doesn't have direct values
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const { LaunchMetadataService } = await import('@/lib/launchMetadataService');
+        const metadata = await LaunchMetadataService.getMetadata(launch.id);
+        
+        if (metadata) {
+          // PRIORITY: Use name, symbol, image directly from Supabase (fastest access)
+          if (metadata.name) {
+            setLaunchName(metadata.name);
+            console.log('✅ Loaded token name from Supabase (fastest):', metadata.name);
+          }
+          if (metadata.symbol) {
+            setLaunchSymbol(metadata.symbol);
+            console.log('✅ Loaded token symbol from Supabase (fastest):', metadata.symbol);
+          }
+          if (metadata.image) {
+            setCurrentImageSrc(metadata.image);
+            console.log('✅ Loaded token image from Supabase (fastest):', metadata.image);
+          }
+          
+          // PRIORITY 2: Fetch from IPFS only if Supabase doesn't have direct values
+          const needsIPFSFetch = !metadata.name || !metadata.symbol || !metadata.image;
+          const metadataUri = metadata.metadata_uri || launch.metadataUri;
+          
+          if (needsIPFSFetch && metadataUri) {
+            console.log(`📥 Fetching missing metadata from IPFS (fallback):`, metadataUri);
+            try {
+              const { getFullTokenMetadata } = await import('@/lib/ipfsMetadataFetcher');
+              const fullMetadata = await getFullTokenMetadata(metadataUri);
+              
+              if (fullMetadata) {
+                // Only update if Supabase didn't provide the value
+                if (!metadata.name && fullMetadata.name) {
+                  setLaunchName(fullMetadata.name);
+                  console.log('✅ Fetched token name from IPFS (fallback):', fullMetadata.name);
+                }
+                if (!metadata.symbol && fullMetadata.symbol) {
+                  setLaunchSymbol(fullMetadata.symbol);
+                  console.log('✅ Fetched token symbol from IPFS (fallback):', fullMetadata.symbol);
+                }
+                if (!metadata.image && fullMetadata.image) {
+                  setCurrentImageSrc(fullMetadata.image);
+                  console.log('✅ Fetched token image from IPFS (fallback):', fullMetadata.image);
+                }
+              }
+            } catch (ipfsError) {
+              console.warn('⚠️ Could not fetch metadata from IPFS (will use blockchain data as fallback):', ipfsError);
+            }
+          } else if (!needsIPFSFetch) {
+            console.log('✅ All metadata (name, symbol, image) loaded from Supabase - skipping IPFS fetch');
+          }
+        }
+      } catch (error) {
+        // Non-critical - continue with existing data
+        console.log('ℹ️ Could not load metadata from Supabase (non-critical):', error);
+      }
+    };
+    
+    fetchMetadata();
+  }, [launch.id, launch.metadataUri]);
 
   const formatTimeAgo = (date: Date | number): string => {
     const now = new Date();
@@ -931,7 +955,7 @@ function LaunchCard({
   };
 
   const progressPercentage = launch.launchType === 'raffle' 
-    ? ((launch.soldTickets || 0) / (launch.maxTickets || 1000)) * 100 
+    ? ((launch.maxTickets ?? 0) > 0 ? ((launch.soldTickets || 0) / (launch.maxTickets ?? 1)) * 100 : 0) 
     : Math.min(100, (launch.volume24h / launch.marketCap) * 100);
 
   // Handle image loading with multiple IPFS gateways
@@ -983,10 +1007,10 @@ function LaunchCard({
       {/* Image and Basic Info */}
       <div className="flex items-start space-x-4 mb-4">
         <div className="w-20 h-20 rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
-          {launch.image && !imageError ? (
+          {currentImageSrc && !imageError ? (
             <img 
               src={currentImageSrc} 
-                    alt={launch.name}
+                    alt={launchName}
                     className="w-full h-full object-cover"
               onError={handleImageError}
               onLoad={() => console.log(`✅ Image loaded successfully: ${currentImageSrc}`)}
@@ -994,7 +1018,7 @@ function LaunchCard({
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center">
               <span className="text-white font-bold text-2xl">
-                {launch.symbol.charAt(0)}
+                {launchSymbol.charAt(0)}
                   </span>
                 </div>
               )}
@@ -1003,7 +1027,7 @@ function LaunchCard({
         <div className="flex-1 min-w-0">
           <div className="flex flex-col space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-white font-semibold text-base truncate">{launch.name}</h3>
+              <h3 className="text-white font-semibold text-base truncate">{launchName}</h3>
               {launch.featured && (
                 <div className="w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
                   <Star className="w-3 h-3 text-white" />
@@ -1042,7 +1066,7 @@ function LaunchCard({
               </Badge>
             </div>
           </div>
-          <p className="text-gray-400 text-sm mt-2">{launch.symbol}</p>
+          <p className="text-gray-400 text-sm mt-2">{launchSymbol}</p>
           <p className="text-gray-500 text-xs mt-1">CA: {launch.baseTokenMint.substring(0, 4)}...{launch.baseTokenMint.substring(launch.baseTokenMint.length - 4)}</p>
         </div>
           </div>
@@ -1059,17 +1083,11 @@ function LaunchCard({
                 </div>
 
       {/* Enhanced Metrics */}
-      <div className="grid grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 gap-4 mb-4">
         <div className="text-center">
           <div className="text-gray-400 text-xs">24h Volume</div>
           <div className="text-white font-semibold text-sm">
             ${formatMarketCap(launch.volume24h || 0)}
-          </div>
-        </div>
-        <div className="text-center">
-          <div className="text-gray-400 text-xs">Holders</div>
-          <div className="text-white font-semibold text-sm">
-            {launch.holdersCount || launch.participants || 0}
           </div>
         </div>
       </div>
@@ -1084,7 +1102,7 @@ function LaunchCard({
               </div>
         <div className="flex justify-between text-sm text-gray-400 mt-2">
           <span>{progressPercentage.toFixed(2)}%</span>
-          <span>{launch.launchType === 'raffle' ? `${launch.soldTickets || 0}/${launch.maxTickets || 1000}` : 'Progress'}</span>
+          <span>{launch.launchType === 'raffle' ? `${launch.soldTickets || 0}${(launch.maxTickets ?? 0) > 0 ? `/${launch.maxTickets}` : ' (unlimited)'}` : 'Progress'}</span>
             </div>
           </div>
 

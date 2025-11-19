@@ -1,0 +1,441 @@
+/**
+ * Quotation Service
+ * 
+ * Dedicated service for fetching and calculating swap quotes
+ * ALWAYS uses Supabase as source of truth for current_price, tokens_sold, and pool_sol_balance
+ * Falls back to blockchain queries if Supabase doesn't have the data
+ */
+
+import { PublicKey, Connection } from '@solana/web3.js';
+import { bondingCurveService } from './bondingCurveService';
+import { TradingService } from './tradingService';
+import { LaunchMetadataService } from './launchMetadataService';
+
+export interface SwapQuote {
+  tokensReceived?: number; // Human-readable token amount
+  solReceived?: number; // Human-readable SOL amount
+  priceImpact: number; // Percentage
+  avgPrice: number; // SOL per token
+  currentPrice: number; // Current price before trade
+  postTradePrice: number; // Price after trade
+  source: 'trading_service' | 'bonding_curve' | 'amm_pool';
+}
+
+export class QuotationService {
+  private connection: Connection;
+  private tradingService: TradingService;
+
+  constructor(connection: Connection) {
+    this.connection = connection;
+    this.tradingService = new TradingService(connection);
+  }
+
+  /**
+   * Get quote for buying tokens with SOL
+   * ALWAYS fetches latest current_price, tokens_sold from Supabase first (source of truth)
+   */
+  async getBuyQuote(
+    tokenMint: string,
+    solAmount: number,
+    totalSupply: number,
+    tokensSold: number, // Fallback value if Supabase doesn't have it
+    decimals: number,
+    currentPrice: number // Fallback value if Supabase doesn't have it
+  ): Promise<SwapQuote> {
+    // STEP 1: Fetch latest state from Supabase (source of truth)
+    let latestTokensSold = tokensSold;
+    let latestCurrentPrice = currentPrice;
+    let latestTotalSupply = totalSupply;
+    let latestDecimals = decimals;
+    
+    try {
+      const metadata = await LaunchMetadataService.getMetadataByTokenMint(tokenMint);
+      if (metadata) {
+        // Use Supabase values if available (they're always up-to-date after trades)
+        if (metadata.tokens_sold !== undefined && metadata.tokens_sold !== null) {
+          latestTokensSold = metadata.tokens_sold;
+        }
+        if (metadata.current_price !== undefined && metadata.current_price !== null && metadata.current_price > 0) {
+          latestCurrentPrice = metadata.current_price;
+        }
+        if (metadata.total_supply !== undefined && metadata.total_supply !== null) {
+          latestTotalSupply = metadata.total_supply;
+        }
+        if (metadata.decimals !== undefined && metadata.decimals !== null) {
+          latestDecimals = metadata.decimals;
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not fetch latest state from Supabase, using fallback values:', error);
+    }
+
+    // STEP 2: If current price is still invalid, calculate it from bonding curve
+    if (latestCurrentPrice <= 0) {
+      const bondingCurveConfig = {
+        totalSupply: latestTotalSupply,
+        decimals: latestDecimals,
+        curveType: 'linear' as const,
+      };
+      latestCurrentPrice = bondingCurveService.calculatePrice(latestTokensSold, bondingCurveConfig);
+    }
+
+    const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+    const tokenMintKey = new PublicKey(tokenMint);
+
+    // STEP 3: Try to get real quote from trading service first
+    try {
+      const quote = await this.tradingService.getSwapQuote(
+        WSOL_MINT,
+        tokenMintKey,
+        solAmount,
+        'cook'
+      );
+
+      if (quote && quote.outputAmount > 0 && isFinite(quote.outputAmount)) {
+        // quote.outputAmount is in human-readable format
+        const tokensReceived = quote.outputAmount;
+        const postBuyTokensSold = latestTokensSold + tokensReceived;
+        
+        const bondingCurveConfig = {
+          totalSupply: latestTotalSupply,
+          decimals: latestDecimals,
+          curveType: 'linear' as const,
+        };
+        
+        const postTradePrice = bondingCurveService.calculatePrice(postBuyTokensSold, bondingCurveConfig);
+        const avgPrice = tokensReceived > 0 ? solAmount / tokensReceived : latestCurrentPrice;
+        const priceImpact = latestCurrentPrice > 0 
+          ? ((postTradePrice - latestCurrentPrice) / latestCurrentPrice) * 100 
+          : 0;
+
+        return {
+          tokensReceived,
+          priceImpact: quote.priceImpact || priceImpact,
+          avgPrice,
+          currentPrice: latestCurrentPrice, // Use latest from Supabase
+          postTradePrice,
+          source: 'trading_service'
+        };
+      }
+    } catch (error) {
+      // Fall through to bonding curve calculation
+    }
+
+    // STEP 4: Fallback to bonding curve calculation using latest values
+    return this.getBondingCurveBuyQuote(
+      solAmount,
+      latestTotalSupply,
+      latestTokensSold,
+      latestDecimals,
+      latestCurrentPrice
+    );
+  }
+
+  /**
+   * Get quote for selling tokens for SOL
+   * ALWAYS fetches latest current_price, tokens_sold from Supabase first (source of truth)
+   */
+  async getSellQuote(
+    tokenMint: string,
+    tokenAmount: number,
+    totalSupply: number,
+    tokensSold: number, // Fallback value if Supabase doesn't have it
+    decimals: number,
+    currentPrice: number // Fallback value if Supabase doesn't have it
+  ): Promise<SwapQuote> {
+    // STEP 1: Fetch latest state from Supabase (source of truth)
+    let latestTokensSold = tokensSold;
+    let latestCurrentPrice = currentPrice;
+    let latestTotalSupply = totalSupply;
+    let latestDecimals = decimals;
+    
+    try {
+      const metadata = await LaunchMetadataService.getMetadataByTokenMint(tokenMint);
+      if (metadata) {
+        // Use Supabase values if available (they're always up-to-date after trades)
+        if (metadata.tokens_sold !== undefined && metadata.tokens_sold !== null) {
+          latestTokensSold = metadata.tokens_sold;
+        }
+        if (metadata.current_price !== undefined && metadata.current_price !== null && metadata.current_price > 0) {
+          latestCurrentPrice = metadata.current_price;
+        }
+        if (metadata.total_supply !== undefined && metadata.total_supply !== null) {
+          latestTotalSupply = metadata.total_supply;
+        }
+        if (metadata.decimals !== undefined && metadata.decimals !== null) {
+          latestDecimals = metadata.decimals;
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not fetch latest state from Supabase, using fallback values:', error);
+    }
+
+    // STEP 2: If current price is still invalid, calculate it from bonding curve
+    if (latestCurrentPrice <= 0) {
+      const bondingCurveConfig = {
+        totalSupply: latestTotalSupply,
+        decimals: latestDecimals,
+        curveType: 'linear' as const,
+      };
+      latestCurrentPrice = bondingCurveService.calculatePrice(latestTokensSold, bondingCurveConfig);
+    }
+
+    const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+    const tokenMintKey = new PublicKey(tokenMint);
+
+    // STEP 3: Try to get real quote from trading service first
+    try {
+      const quote = await this.tradingService.getSwapQuote(
+        tokenMintKey,
+        WSOL_MINT,
+        tokenAmount, // Already in human-readable format
+        'cook'
+      );
+
+      if (quote && quote.outputAmount > 0 && isFinite(quote.outputAmount)) {
+        // quote.outputAmount is in SOL (human-readable)
+        const solReceived = quote.outputAmount;
+        const postSellTokensSold = Math.max(0, latestTokensSold - tokenAmount);
+        
+        const bondingCurveConfig = {
+          totalSupply: latestTotalSupply,
+          decimals: latestDecimals,
+          curveType: 'linear' as const,
+        };
+        
+        const postTradePrice = bondingCurveService.calculatePrice(postSellTokensSold, bondingCurveConfig);
+        const avgPrice = tokenAmount > 0 ? solReceived / tokenAmount : latestCurrentPrice;
+        const priceImpact = latestCurrentPrice > 0 
+          ? ((latestCurrentPrice - postTradePrice) / latestCurrentPrice) * 100 
+          : 0;
+
+        return {
+          solReceived,
+          priceImpact: quote.priceImpact || priceImpact,
+          avgPrice,
+          currentPrice: latestCurrentPrice, // Use latest from Supabase
+          postTradePrice,
+          source: 'trading_service'
+        };
+      }
+    } catch (error) {
+      // Fall through to bonding curve calculation
+    }
+
+    // STEP 4: Fallback to bonding curve calculation using latest values
+    return this.getBondingCurveSellQuote(
+      tokenAmount,
+      latestTotalSupply,
+      latestTokensSold,
+      latestDecimals,
+      latestCurrentPrice
+    );
+  }
+
+  /**
+   * Calculate buy quote using bonding curve formula
+   * 
+   * For a linear bonding curve: P(x) = a*x + b
+   * Where:
+   * - x = tokens sold (human-readable)
+   * - a = slope (price increase per token)
+   * - b = base price (starting price)
+   * 
+   * To calculate tokens for SOL amount, we integrate:
+   * SOL = ∫(a*x + b)dx from x0 to x1
+   * SOL = (a/2)(x1^2 - x0^2) + b(x1 - x0)
+   * 
+   * Solving for x1: x1 = (-b + sqrt(b^2 + 2*a*SOL + 2*a*b*x0 + a*x0^2)) / a
+   * Tokens received = x1 - x0
+   */
+  private getBondingCurveBuyQuote(
+    solAmount: number,
+    totalSupply: number,
+    tokensSold: number,
+    decimals: number,
+    currentPrice: number
+  ): SwapQuote {
+    const config = {
+      totalSupply,
+      decimals,
+      curveType: 'linear' as const,
+    };
+
+    // Get curve parameters
+    const basePrice = bondingCurveService.calculateInitialPrice(config);
+    const slope = this.calculateSlopeFromSupply(totalSupply);
+    
+    // For very small slopes (large supplies like 10B+), use current price directly
+    // This matches the backend behavior for large supplies
+    // When slope is extremely small, the curve is nearly flat, so: tokens = SOL / currentPrice
+    // BUT: Always use the proper quadratic formula first, only fallback if it fails
+    if (false) { // DISABLED: Always use proper quadratic formula
+      // Validate current price
+      if (currentPrice <= 0) {
+        // Fallback: calculate current price from bonding curve
+        const calculatedPrice = bondingCurveService.calculatePrice(tokensSold, config);
+        if (calculatedPrice <= 0) {
+          return {
+            tokensReceived: 0,
+            priceImpact: 0,
+            avgPrice: 0,
+            currentPrice: 0,
+            postTradePrice: 0,
+            source: 'bonding_curve'
+          };
+        }
+        // Use calculated price
+        const tokensReceived = solAmount / calculatedPrice;
+        const postBuyTokensSold = tokensSold + tokensReceived;
+        const postTradePrice = bondingCurveService.calculatePrice(postBuyTokensSold, config);
+        
+        return {
+          tokensReceived,
+          priceImpact: 0,
+          avgPrice: calculatedPrice,
+          currentPrice: calculatedPrice,
+          postTradePrice,
+          source: 'bonding_curve'
+        };
+      }
+      
+      // Use current price directly for calculation
+      const tokensReceived = solAmount / currentPrice;
+      
+      // Calculate post-buy price for display
+      const postBuyTokensSold = tokensSold + tokensReceived;
+      const postTradePrice = bondingCurveService.calculatePrice(postBuyTokensSold, config);
+      
+      const priceImpact = currentPrice > 0 
+        ? ((postTradePrice - currentPrice) / currentPrice) * 100 
+        : 0;
+      
+      // Average price is the current price (calculation uses current price)
+      const avgPrice = currentPrice;
+      
+      return {
+        tokensReceived,
+        priceImpact,
+        avgPrice,
+        currentPrice,
+        postTradePrice,
+        source: 'bonding_curve'
+      };
+    }
+
+    // Use the standard bonding curve calculation
+    // calculateTokensForSol returns human-readable units
+    const tokensReceived = bondingCurveService.calculateTokensForSol(
+      solAmount,
+      tokensSold, // Human-readable format
+      config
+    );
+
+    // Validate result
+    if (!isFinite(tokensReceived) || tokensReceived <= 0) {
+      // If calculation fails, return error
+      return {
+        tokensReceived: 0,
+        priceImpact: 0,
+        avgPrice: currentPrice,
+        currentPrice,
+        postTradePrice: currentPrice,
+        source: 'bonding_curve'
+      };
+    }
+
+    // Safety check: ensure tokens don't exceed available supply
+    const maxAvailable = totalSupply - tokensSold;
+    const finalTokensReceived = Math.min(tokensReceived, maxAvailable);
+
+    // Calculate post-buy price
+    const postBuyTokensSold = tokensSold + finalTokensReceived;
+    const postTradePrice = bondingCurveService.calculatePrice(postBuyTokensSold, config);
+
+    // Calculate price impact
+    const priceImpact = currentPrice > 0 
+      ? ((postTradePrice - currentPrice) / currentPrice) * 100 
+      : 0;
+
+    // Average price is what you actually paid per token
+    // For display purposes, use current price (not calculated average)
+    const avgPrice = currentPrice;
+
+    return {
+      tokensReceived: finalTokensReceived,
+      priceImpact,
+      avgPrice,
+      currentPrice,
+      postTradePrice,
+      source: 'bonding_curve'
+    };
+  }
+
+  /**
+   * Calculate slope from total supply
+   * This matches the bondingCurveService implementation EXACTLY
+   */
+  private calculateSlopeFromSupply(totalSupply: number): number {
+    if (totalSupply <= 0) return 0.0000000000001;
+    
+    // Match backend: base_pi = 0.000000001, reference_supply = 1_000_000_000
+    const referenceSupply = 1_000_000_000.0; // 1 billion (matches backend)
+    const basePi = 0.000000001; // Matches backend base_pi
+    
+    // Calculate supply scale (same as backend)
+    const supplyScale = Math.min(referenceSupply / Math.max(1, totalSupply), 1.0);
+    const slope = basePi * supplyScale;
+    
+    // Ensure minimum (matches backend)
+    return Math.max(0.0000000000001, slope);
+  }
+
+  /**
+   * Calculate sell quote using bonding curve formula
+   */
+  private getBondingCurveSellQuote(
+    tokenAmount: number,
+    totalSupply: number,
+    tokensSold: number,
+    decimals: number,
+    currentPrice: number
+  ): SwapQuote {
+    const config = {
+      totalSupply,
+      decimals,
+      curveType: 'linear' as const,
+    };
+
+    // Calculate SOL received
+    // calculateSolForTokens expects tokensAmount in human-readable format and returns SOL
+    const solReceived = bondingCurveService.calculateSolForTokens(
+      tokenAmount, // Human-readable format
+      tokensSold,
+      config
+    );
+
+    // Calculate post-sell price
+    const postSellTokensSold = Math.max(0, tokensSold - tokenAmount);
+    const postTradePrice = bondingCurveService.calculatePrice(postSellTokensSold, config);
+
+    // Calculate price impact
+    const priceImpact = currentPrice > 0 
+      ? ((currentPrice - postTradePrice) / currentPrice) * 100 
+      : 0;
+
+    // Calculate average price
+    const avgPrice = tokenAmount > 0 
+      ? solReceived / tokenAmount 
+      : currentPrice;
+
+    return {
+      solReceived,
+      priceImpact,
+      avgPrice,
+      currentPrice,
+      postTradePrice,
+      source: 'bonding_curve'
+    };
+  }
+}
+

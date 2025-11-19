@@ -58,6 +58,8 @@ pub enum LaunchKeys {
     Seller,
     TeamWallet,
     WSOLAddress,
+    CookDEXPool,
+    RaydiumPool,
     LENGTH,
 }
 
@@ -110,6 +112,12 @@ pub struct LaunchData {
     pub flags: Vec<u8>,
     pub strings: Vec<String>,
     pub keys: Vec<Pubkey>,
+    
+    // Instant launch fields (pump.fun-style bonding curve)
+    pub is_tradable: bool, // Whether the token can be traded (raffle graduation)
+    pub tokens_sold: u64, // Tokens sold (circulating supply) for instant launches - pump.fun style bonding curve
+    pub is_graduated: bool, // Whether instant launch has graduated to AMM (bonding curve ended)
+    pub graduation_threshold: u64, // Market cap threshold for graduation (in lamports, default ~$85k)
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
@@ -123,6 +131,7 @@ pub struct JoinData {
     pub ticket_status: TicketStatus,
     pub random_address: Pubkey,
     pub last_slot: u64,
+    pub order_id: String, // Transaction signature of the ticket purchase
 }
 
 pub fn get_join_data_size() -> usize {

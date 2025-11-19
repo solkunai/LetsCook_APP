@@ -205,6 +205,163 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Pinata IPFS proxy endpoint (bypasses CORS)
+  // Accepts base64 file data from frontend
+  app.post('/api/pinata/upload', async (req, res) => {
+    try {
+      // Get Pinata credentials from environment
+      const PINATA_JWT = process.env.PINATA_JWT || process.env.VITE_PINATA_JWT || '';
+      const PINATA_API_KEY = process.env.PINATA_API_KEY || process.env.VITE_PINATA_API_KEY || '';
+      const PINATA_SECRET_KEY = process.env.PINATA_SECRET_KEY || process.env.VITE_PINATA_SECRET_KEY || '';
+
+      if (!PINATA_JWT && (!PINATA_API_KEY || !PINATA_SECRET_KEY)) {
+        return res.status(500).json({ error: 'Pinata credentials not configured on server' });
+      }
+
+      const { fileData, filename, contentType, metadata, options } = req.body;
+
+      if (!fileData) {
+        return res.status(400).json({ error: 'Missing fileData (base64 encoded file)' });
+      }
+
+      // Convert base64 to buffer
+      // Remove data URL prefix if present (e.g., "data:image/png;base64,")
+      const base64Data = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+      const fileBuffer = Buffer.from(base64Data, 'base64');
+
+      // Forward the request to Pinata API
+      const authHeaders: Record<string, string> = {};
+      if (PINATA_JWT) {
+        authHeaders['Authorization'] = `Bearer ${PINATA_JWT}`;
+      } else {
+        authHeaders['pinata_api_key'] = PINATA_API_KEY;
+        authHeaders['pinata_secret_api_key'] = PINATA_SECRET_KEY;
+      }
+
+      // Use node-fetch and form-data
+      const fetch = (await import('node-fetch')).default;
+      const FormData = (await import('form-data')).default;
+      
+      const pinataFormData = new FormData();
+      pinataFormData.append('file', fileBuffer, {
+        filename: filename || 'file',
+        contentType: contentType || 'application/octet-stream',
+      });
+
+      if (metadata) {
+        pinataFormData.append('pinataMetadata', JSON.stringify(metadata));
+      }
+
+      if (options) {
+        pinataFormData.append('pinataOptions', JSON.stringify(options));
+      }
+
+      const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          ...pinataFormData.getHeaders(),
+        },
+        body: pinataFormData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Pinata API error:', errorText);
+        return res.status(response.status).json({ 
+          error: `Pinata API error: ${response.status} ${response.statusText}`,
+          details: errorText 
+        });
+      }
+
+      const result = await response.json();
+      
+      res.json({
+        success: true,
+        cid: result.IpfsHash,
+        size: result.PinSize || fileBuffer.length,
+        name: result.Name || filename || 'file',
+      });
+    } catch (error) {
+      console.error('❌ Pinata proxy error:', error);
+      res.status(500).json({ 
+        error: 'Failed to upload to Pinata',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Pinata JSON upload proxy
+  app.post('/api/pinata/upload-json', async (req, res) => {
+    try {
+      const PINATA_JWT = process.env.PINATA_JWT || process.env.VITE_PINATA_JWT || '';
+      const PINATA_API_KEY = process.env.PINATA_API_KEY || process.env.VITE_PINATA_API_KEY || '';
+      const PINATA_SECRET_KEY = process.env.PINATA_SECRET_KEY || process.env.VITE_PINATA_SECRET_KEY || '';
+
+      if (!PINATA_JWT && (!PINATA_API_KEY || !PINATA_SECRET_KEY)) {
+        return res.status(500).json({ error: 'Pinata credentials not configured on server' });
+      }
+
+      const { jsonData, filename, metadata, options } = req.body;
+
+      if (!jsonData) {
+        return res.status(400).json({ error: 'Missing jsonData' });
+      }
+
+      const authHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (PINATA_JWT) {
+        authHeaders['Authorization'] = `Bearer ${PINATA_JWT}`;
+      } else {
+        authHeaders['pinata_api_key'] = PINATA_API_KEY;
+        authHeaders['pinata_secret_api_key'] = PINATA_SECRET_KEY;
+      }
+
+      const pinataData: any = {
+        pinataContent: jsonData,
+      };
+
+      if (metadata) {
+        pinataData.pinataMetadata = metadata;
+      }
+
+      if (options) {
+        pinataData.pinataOptions = options;
+      }
+
+      const fetch = (await import('node-fetch')).default;
+      const response = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(pinataData),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({ 
+          error: `Pinata API error: ${response.status}`,
+          details: errorText 
+        });
+      }
+
+      const result = await response.json();
+      
+      res.json({
+        success: true,
+        cid: result.IpfsHash,
+        size: result.PinSize || 0,
+      });
+    } catch (error) {
+      console.error('❌ Pinata JSON proxy error:', error);
+      res.status(500).json({ 
+        error: 'Failed to upload JSON to Pinata',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   // Placeholder image API
   app.get('/api/placeholder/:width/:height', async (req, res) => {
     try {

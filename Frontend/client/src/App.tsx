@@ -80,6 +80,12 @@ function AppContent() {
 
   const handleOnboardingComplete = (data: any) => {
     console.log("Onboarding completed:", data);
+    if (data?.referralLink) {
+      localStorage.setItem("referral_link", data.referralLink);
+    }
+    if (data?.username) {
+      localStorage.setItem("username", data.username);
+    }
     localStorage.setItem("onboarding_complete", "true");
     setShowOnboarding(false);
   };

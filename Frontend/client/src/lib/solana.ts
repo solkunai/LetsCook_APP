@@ -1,7 +1,7 @@
 import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js';
 
 // Program ID from your deployed native Solana program
-export const PROGRAM_ID = new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ');
+export const PROGRAM_ID = new PublicKey('J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg');
 
 // Network configuration
 export const NETWORK = {

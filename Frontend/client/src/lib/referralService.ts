@@ -1,9 +1,11 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { 
   buildBuyTicketsTransaction,
   PROGRAM_ID 
 } from './solanaProgram';
 import { realLaunchService } from './realLaunchService';
+import { getSupabaseClient } from './supabase';
+import { getConnection } from './connection';
 
 export interface ReferralData {
   referralCode: string;
@@ -40,9 +42,9 @@ export interface ReferralReward {
 }
 
 export class ReferralService {
-  private connection: Connection;
+  private connection: ReturnType<typeof getConnection>;
 
-  constructor(connection: Connection) {
+  constructor(connection: ReturnType<typeof getConnection>) {
     this.connection = connection;
   }
 
@@ -56,17 +58,34 @@ export class ReferralService {
       const hash = await this.simpleHash(walletAddress);
       const code = `CHEF${hash.slice(0, 8).toUpperCase()}`;
       
-      // Store in localStorage for persistence (in production, this would be in a database)
-      const existingCodes = this.getStoredReferralCodes();
-      if (!existingCodes[walletAddress]) {
-        existingCodes[walletAddress] = {
-          code,
-          createdAt: Date.now(),
-          referredCount: 0,
-          totalEarnings: 0,
-          pointsEarned: 0
-        };
-        localStorage.setItem('referralCodes', JSON.stringify(existingCodes));
+      // Prefer Supabase if configured
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        await supabase
+          .from('referral_codes')
+          .upsert(
+            {
+              wallet_address: walletAddress,
+              referral_code: code,
+              referred_count: 0,
+              total_earnings: 0,
+              points_earned: 0,
+              created_at: new Date().toISOString(),
+            },
+            { onConflict: 'wallet_address' }
+          );
+      } else {
+        const existingCodes = this.getStoredReferralCodes();
+        if (!existingCodes[walletAddress]) {
+          existingCodes[walletAddress] = {
+            code,
+            createdAt: Date.now(),
+            referredCount: 0,
+            totalEarnings: 0,
+            pointsEarned: 0
+          };
+          localStorage.setItem('referralCodes', JSON.stringify(existingCodes));
+        }
       }
       
       return code;
@@ -74,6 +93,37 @@ export class ReferralService {
       console.error('Error generating referral code:', error);
       throw error;
     }
+  }
+
+  // Set/update username for a wallet
+  async setUsername(userPublicKey: PublicKey, username: string): Promise<void> {
+    try {
+      const walletAddress = userPublicKey.toBase58();
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        await supabase
+          .from('referral_codes')
+          .update({ username })
+          .eq('wallet_address', walletAddress);
+      } else {
+        const existingCodes = this.getStoredReferralCodes();
+        existingCodes[walletAddress] = {
+          ...(existingCodes[walletAddress] || {}),
+          username,
+        };
+        localStorage.setItem('referralCodes', JSON.stringify(existingCodes));
+      }
+    } catch (error) {
+      console.error('Error setting username:', error);
+    }
+  }
+
+  getReferralLink(userPublicKey: PublicKey, referralCode?: string): string {
+    const code = referralCode || 'REF';
+    // Prefer configured app URL if present
+    const viteEnv: any = (import.meta as any).env || {};
+    const base = viteEnv.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    return `${base}?ref=${code}`;
   }
 
   // Simple hash function for generating codes
@@ -113,30 +163,62 @@ export class ReferralService {
       const walletAddress = userPublicKey.toBase58();
       const referralCode = await this.generateReferralCode(userPublicKey);
       
-      // Get stored referral data
-      const storedCodes = this.getStoredReferralCodes();
-      const userData = storedCodes[walletAddress] || {
-        code: referralCode,
-        createdAt: Date.now(),
-        referredCount: 0,
-        totalEarnings: 0,
-        pointsEarned: 0
-      };
-
-      // Get referred friends from stored data
-      const referredFriends = this.getReferredFriends(walletAddress);
+      const supabase = getSupabaseClient();
+      let referredFriends: ReferredFriend[] = [];
+      let referredCount = 0;
+      let pointsEarned = 0;
+      let totalEarnings = 0;
+      
+      if (supabase) {
+        const { data: codeRow } = await supabase
+          .from('referral_codes')
+          .select('referral_code,referred_count,points_earned,total_earnings')
+          .eq('wallet_address', walletAddress)
+          .maybeSingle();
+        if (codeRow) {
+          referredCount = codeRow.referred_count ?? 0;
+          pointsEarned = codeRow.points_earned ?? 0;
+          totalEarnings = codeRow.total_earnings ?? 0;
+        }
+        const { data: friends } = await supabase
+          .from('referred_friends')
+          .select('friend_wallet,username,points_earned,date,status,total_spent,commission_earned')
+          .eq('referrer_wallet', walletAddress);
+        referredFriends = (friends || []).map(f => ({
+          username: f.username || (f.friend_wallet?.slice(0, 8) ?? ''),
+          walletAddress: f.friend_wallet,
+          pointsEarned: f.points_earned ?? 0,
+          date: f.date ?? new Date().toISOString(),
+          status: (f.status as 'active' | 'inactive') ?? 'active',
+          totalSpent: f.total_spent ?? 0,
+          commissionEarned: f.commission_earned ?? 0,
+        }));
+      } else {
+        const storedCodes = this.getStoredReferralCodes();
+        const userData = storedCodes[walletAddress] || {
+          code: referralCode,
+          createdAt: Date.now(),
+          referredCount: 0,
+          totalEarnings: 0,
+          pointsEarned: 0
+        };
+        referredCount = userData.referredCount;
+        pointsEarned = userData.pointsEarned;
+        totalEarnings = userData.totalEarnings;
+        referredFriends = this.getReferredFriends(walletAddress);
+      }
       
       const referralData: ReferralData = {
-        referralCode: userData.code,
-        referredCount: userData.referredCount,
-        pointsEarned: userData.pointsEarned,
-        totalEarnings: userData.totalEarnings,
+        referralCode,
+        referredCount,
+        pointsEarned,
+        totalEarnings,
         referredFriends,
         referralStats: {
-          totalReferrals: userData.referredCount,
+          totalReferrals: referredCount,
           activeReferrals: referredFriends.filter(f => f.status === 'active').length,
           totalVolume: referredFriends.reduce((sum, f) => sum + f.totalSpent, 0),
-          commissionEarned: userData.totalEarnings
+          commissionEarned: totalEarnings
         }
       };
 
@@ -175,15 +257,27 @@ export class ReferralService {
   // Store referred friend
   private storeReferredFriend(referrerWallet: string, friend: ReferredFriend): void {
     try {
-      const stored = localStorage.getItem('referredFriends');
-      const allReferredFriends = stored ? JSON.parse(stored) : {};
-      
-      if (!allReferredFriends[referrerWallet]) {
-        allReferredFriends[referrerWallet] = [];
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        supabase.from('referred_friends').insert({
+          referrer_wallet: referrerWallet,
+          friend_wallet: friend.walletAddress,
+          username: friend.username,
+          points_earned: friend.pointsEarned,
+          date: friend.date,
+          status: friend.status,
+          total_spent: friend.totalSpent,
+          commission_earned: friend.commissionEarned,
+        });
+      } else {
+        const stored = localStorage.getItem('referredFriends');
+        const allReferredFriends = stored ? JSON.parse(stored) : {};
+        if (!allReferredFriends[referrerWallet]) {
+          allReferredFriends[referrerWallet] = [];
+        }
+        allReferredFriends[referrerWallet].push(friend);
+        localStorage.setItem('referredFriends', JSON.stringify(allReferredFriends));
       }
-      
-      allReferredFriends[referrerWallet].push(friend);
-      localStorage.setItem('referredFriends', JSON.stringify(allReferredFriends));
     } catch (error) {
       console.error('Error storing referred friend:', error);
     }
@@ -214,7 +308,7 @@ export class ReferralService {
     try {
       // Create transaction to claim referral rewards
       const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
       
       // Create instruction to claim rewards
       const instruction = new TransactionInstruction({
@@ -247,7 +341,7 @@ export class ReferralService {
     try {
       // Create transaction to track referral
       const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
       
       // Create instruction to track referral
       const instruction = new TransactionInstruction({
@@ -280,46 +374,23 @@ export class ReferralService {
     rank: number;
   }[]> {
     try {
-      // Fetch real referral leaderboard from blockchain
-      const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
-      
-      // Get all referral accounts
-      const accounts = await connection.getProgramAccounts(programId, {
-        filters: [
-          {
-            dataSize: 1000, // Adjust based on your account size
-          }
-        ]
-      });
-
-      const leaderboard: {
-        username: string;
-        referralCount: number;
-        totalEarnings: number;
-        rank: number;
-      }[] = [];
-      
-      // Parse leaderboard data from accounts
-      for (const account of accounts) {
-        try {
-          const accountData = account.account.data;
-          if (accountData.length < 8) continue;
-          
-          // Parse account data to extract leaderboard information
-          // This would be customized based on your actual account structure
-          leaderboard.push({
-            username: account.pubkey.toBase58().slice(0, 8),
-            referralCount: Math.floor(Math.random() * 50),
-            totalEarnings: Math.random() * 200,
-            rank: leaderboard.length + 1
-          });
-        } catch (error) {
-          console.warn('Failed to parse leaderboard account:', account.pubkey.toBase58(), error);
-        }
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const { data } = await supabase
+          .from('referral_codes')
+          .select('wallet_address, referred_count, total_earnings')
+          .order('referred_count', { ascending: false })
+          .limit(10);
+        const leaderboard = (data || []).map((row, idx) => ({
+          username: (row.wallet_address as string).slice(0, 8),
+          referralCount: (row.referred_count as number) ?? 0,
+          totalEarnings: Number(row.total_earnings ?? 0),
+          rank: idx + 1,
+        }));
+        return leaderboard;
       }
-
-      return leaderboard.sort((a, b) => b.referralCount - a.referralCount).slice(0, 10);
+      // Fallback to empty when no DB configured
+      return [];
     } catch (error) {
       console.error('Error fetching referral leaderboard:', error);
       return [];
@@ -362,14 +433,31 @@ export class ReferralService {
     refereeWallet: PublicKey
   ): Promise<{ success: boolean; referrerWallet?: string }> {
     try {
-      const storedCodes = this.getStoredReferralCodes();
-      const referrerEntry = Object.entries(storedCodes).find(([_, data]: [string, any]) => data.code === referralCode);
-      
-      if (!referrerEntry) {
-        return { success: false };
+      const supabase = getSupabaseClient();
+      let referrerWallet: string | undefined;
+      let referrerData: any = undefined;
+      if (supabase) {
+        const { data } = await supabase
+          .from('referral_codes')
+          .select('wallet_address, referral_code, referred_count, points_earned, total_earnings')
+          .eq('referral_code', referralCode)
+          .maybeSingle();
+        if (!data) return { success: false };
+        referrerWallet = data.wallet_address;
+        referrerData = {
+          referredCount: data.referred_count ?? 0,
+          pointsEarned: data.points_earned ?? 0,
+          totalEarnings: data.total_earnings ?? 0,
+        };
+      } else {
+        const storedCodes = this.getStoredReferralCodes();
+        const entry = Object.entries(storedCodes).find(([_, d]: [string, any]) => d.code === referralCode);
+        if (!entry) return { success: false };
+        referrerWallet = entry[0];
+        referrerData = entry[1];
       }
-
-      const [referrerWallet, referrerData] = referrerEntry;
+      
+      if (!referrerWallet) return { success: false };
       
       // Check if this wallet has already been referred
       const existingFriends = this.getReferredFriends(referrerWallet);
@@ -399,6 +487,15 @@ export class ReferralService {
         pointsEarned: referrerData.pointsEarned + 100 // Bonus points for referral
       };
 
+      if (supabase) {
+        await supabase
+          .from('referral_codes')
+          .update({
+            referred_count: updatedData.referredCount,
+            points_earned: updatedData.pointsEarned,
+          })
+          .eq('wallet_address', referrerWallet);
+      }
       this.storeReferralData(referrerWallet, updatedData);
 
       return { success: true, referrerWallet };
@@ -414,6 +511,7 @@ export class ReferralService {
     purchaseAmount: number
   ): Promise<void> {
     try {
+      const supabase = getSupabaseClient();
       const storedCodes = this.getStoredReferralCodes();
       
       // Find the referrer for this wallet
@@ -435,6 +533,15 @@ export class ReferralService {
         pointsEarned: referrerData.pointsEarned + Math.floor(commission * 10) // Points based on commission
       };
 
+      if (supabase) {
+        await supabase
+          .from('referral_codes')
+          .update({
+            total_earnings: updatedData.totalEarnings,
+            points_earned: updatedData.pointsEarned,
+          })
+          .eq('wallet_address', referrerWallet);
+      }
       this.storeReferralData(referrerWallet, updatedData);
 
       // Update referred friend's stats
@@ -445,11 +552,22 @@ export class ReferralService {
         friends[friendIndex].totalSpent += purchaseAmount;
         friends[friendIndex].commissionEarned += commission;
         
-        // Store updated friends data
-        const stored = localStorage.getItem('referredFriends');
-        const allReferredFriends = stored ? JSON.parse(stored) : {};
-        allReferredFriends[referrerWallet] = friends;
-        localStorage.setItem('referredFriends', JSON.stringify(allReferredFriends));
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          await supabase
+            .from('referred_friends')
+            .update({
+              total_spent: friends[friendIndex].totalSpent,
+              commission_earned: friends[friendIndex].commissionEarned,
+            })
+            .eq('referrer_wallet', referrerWallet)
+            .eq('friend_wallet', refereeWallet.toBase58());
+        } else {
+          const stored = localStorage.getItem('referredFriends');
+          const allReferredFriends = stored ? JSON.parse(stored) : {};
+          allReferredFriends[referrerWallet] = friends;
+          localStorage.setItem('referredFriends', JSON.stringify(allReferredFriends));
+        }
       }
 
       // Add reward record
@@ -488,5 +606,5 @@ export class ReferralService {
 
 // Export singleton instance
 export const referralService = new ReferralService(
-  new Connection('https://api.devnet.solana.com', 'confirmed')
+  getConnection('confirmed')
 );

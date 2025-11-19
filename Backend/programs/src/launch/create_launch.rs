@@ -10,6 +10,7 @@ use crate::{
     launch::{Distribution, LaunchData, LaunchFlags, LaunchKeys, LaunchMeta, LaunchPlugin, Listing, Raffle, WhiteListToken, FCFS, IDO},
     state,
     utils::{self, calculate_rent, create_2022_token},
+    events::emit_launch_created_event,
 };
 pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], args: CreateArgs) -> ProgramResult {
     msg!("🚀 Starting create_launch instruction");
@@ -25,6 +26,33 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
     if !ctx.accounts.user.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
+
+    // ============================================
+    // STEP 1: Derive and validate token mint PDA
+    // ============================================
+    // Derive token mint PDA from page_name with "cook" prefix
+    // Using "cook" in the seed ensures the PDA address contains "cook"
+    msg!("🔍 STEP 1: Deriving token mint PDA from page_name with 'cook' prefix");
+    let (expected_token_mint, token_mint_bump) = Pubkey::find_program_address(
+        &[b"cook", b"TokenMint", args.page_name.as_bytes()],
+        program_id,
+    );
+    
+    // Validate the provided base_token_mint matches the derived PDA
+    if *ctx.accounts.base_token_mint.key != expected_token_mint {
+        msg!("❌ Error: Token mint must be a PDA derived from page_name");
+        msg!("  Expected PDA: {}", expected_token_mint);
+        msg!("  Received: {}", ctx.accounts.base_token_mint.key);
+        msg!("  Seeds: [b\"cook\", b\"TokenMint\", page_name: \"{}\"]", args.page_name);
+        return Err(ProgramError::InvalidAccountData);
+    }
+    msg!("✅ Token mint PDA validated: {} (bump: {})", ctx.accounts.base_token_mint.key, token_mint_bump);
+    
+    // Clone page_name early since it will be moved into launch_data later
+    let page_name_clone = args.page_name.clone();
+    
+    // Note: create_2022_token will handle PDA account creation with correct size
+    // No need to create the account here - let create_2022_token do it
 
     msg!("🔍 Validating listing PDA");
     let listing_bump_seed = accounts::check_program_data_account(
@@ -88,10 +116,47 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
         return Err(ProgramError::InvalidAccountData);
     }
 
-    if args.num_mints == 0 {
-        msg!("num mints must be > 0");
+    // num_mints == 0 means unlimited tickets (up to total_supply)
+    // This is validated below to ensure it doesn't exceed total_supply
+
+    // Validate string lengths to prevent account size issues
+    if args.name.len() > 50 {
+        msg!("Name too long (max 50 characters)");
         return Err(ProgramError::InvalidAccountData);
     }
+
+    if args.symbol.len() > 10 {
+        msg!("Symbol too long (max 10 characters)");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if args.page_name.len() > 32 {
+        msg!("Page name too long (max 32 characters)");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    // Validate total supply is reasonable
+    if args.total_supply > 1_000_000_000_000_000 {
+        msg!("Total supply too large (max 1 quadrillion)");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    // Determine actual num_mints: 0 means unlimited (up to total_supply)
+    let actual_num_mints = if args.num_mints == 0 {
+        // Unlimited: cap at total_supply (but ensure it fits in u32)
+        if args.total_supply > u32::MAX as u64 {
+            msg!("total_supply too large for unlimited tickets (max: {})", u32::MAX);
+            return Err(ProgramError::InvalidAccountData);
+        }
+        args.total_supply as u32
+    } else {
+        // Validate num_mints doesn't exceed total_supply
+        if u64::from(args.num_mints) > args.total_supply {
+            msg!("num_mints cannot exceed total_supply");
+            return Err(ProgramError::InvalidAccountData);
+        }
+        args.num_mints
+    };
 
     msg!("🔍 Validating ticket price: {} lamports = {} SOL", args.ticket_price, utils::to_sol(args.ticket_price));
     if utils::to_sol(args.ticket_price) < 0.0001 {
@@ -142,7 +207,10 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
         ctx.accounts.quote_token_mint.key,
         ctx.accounts.cook_pda.key,
     )
-    .unwrap();
+    .map_err(|e| {
+        msg!("Failed to create initialize_account3 instruction: {:?}", e);
+        ProgramError::InvalidInstructionData
+    })?;
 
     invoke_signed(
         &init_base_idx,
@@ -213,9 +281,9 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
         listing: *ctx.accounts.listing.key,
         page_name: args.page_name,
         total_supply: args.total_supply,
-        num_mints: args.num_mints,
+        num_mints: actual_num_mints, // Use calculated value (0 input becomes total_supply)
         ticket_price: args.ticket_price,
-        minimum_liquidity: args.ticket_price * (args.num_mints as u64),
+        minimum_liquidity: args.ticket_price * (actual_num_mints as u64),
         launch_date: if args.launch_date > 0 {
             args.launch_date
         } else {
@@ -233,6 +301,12 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
         flags: Vec::with_capacity(LaunchFlags::LENGTH as usize),
         strings: Vec::new(),
         keys: Vec::with_capacity(LaunchKeys::LENGTH as usize),
+        
+        // Instant launch fields (pump.fun-style bonding curve)
+        is_tradable: false, // Raffle launches start non-tradable until graduation
+        tokens_sold: 0, // Start with 0 tokens sold
+        is_graduated: false, // Not graduated yet
+        graduation_threshold: 30_000_000_000u64, // 30 SOL threshold for Raydium liquidity creation
     };
 
     listing.socials = vec!["".to_string(); state::Socials::LENGTH as usize];
@@ -261,7 +335,12 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
     launch_data.flags[LaunchFlags::AMMProvider as usize] = args.amm_provider;
     msg!("✅ AMM provider flag set");
 
-    let listing_len = to_vec(&listing).unwrap().len();
+    let listing_len = to_vec(&listing)
+        .map_err(|e| {
+            msg!("Failed to serialize listing: {:?}", e);
+            ProgramError::InvalidAccountData
+        })?
+        .len();
 
     // create the listing account
     utils::create_program_account(
@@ -275,7 +354,12 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
 
     listing.serialize(&mut &mut ctx.accounts.listing.data.borrow_mut()[..])?;
 
-    let launch_len = to_vec(&launch_data).unwrap().len();
+    let launch_len = to_vec(&launch_data)
+        .map_err(|e| {
+            msg!("Failed to serialize launch_data: {:?}", e);
+            ProgramError::InvalidAccountData
+        })?
+        .len();
 
     // create the account if required
     utils::create_program_account(
@@ -291,10 +375,29 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
 
     let total_token_amount = launch_data.total_supply * u64::pow(10, listing.decimals as u32);
 
+    // Convert ipfs:// URI to HTTP gateway URL for on-chain storage
+    // Wallets and explorers like Solscan need HTTP URLs, not ipfs:// protocol URLs
+    let metadata_uri = if listing.meta_url.starts_with("ipfs://") {
+        // Extract CID from ipfs://CID
+        let cid = listing.meta_url.trim_start_matches("ipfs://");
+        // Use Pinata gateway (most reliable for wallets/explorers)
+        format!("https://gateway.pinata.cloud/ipfs/{}", cid)
+    } else if listing.meta_url.starts_with("http://") || listing.meta_url.starts_with("https://") {
+        // Already an HTTP URL, use as-is
+        listing.meta_url.to_string()
+    } else {
+        // Assume it's a CID without prefix, add gateway
+        format!("https://gateway.pinata.cloud/ipfs/{}", listing.meta_url)
+    };
+    
+    msg!("📝 Metadata URI conversion:");
+    msg!("  Original: {}", listing.meta_url);
+    msg!("  Stored on-chain: {}", metadata_uri);
+
     let token_config = state::TokenDetails {
         name: listing.name.to_string(),
         symbol: listing.symbol.to_string(),
-        uri: listing.meta_url.to_string(),
+        uri: metadata_uri,
         pda: accounts::SOL_SEED,
         decimals: listing.decimals,
         total_supply: total_token_amount,
@@ -302,24 +405,54 @@ pub fn create_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], a
 
     if base_2022 {
         // mint the token
+        // Prepare PDA seeds for mint account creation
+        // Seeds: [b"cook", b"TokenMint", page_name, bump]
+        // Use cloned page_name since args.page_name was moved into launch_data
+        let mint_seeds: &[&[u8]] = &[
+            b"cook",
+            b"TokenMint",
+            page_name_clone.as_bytes(),
+            &[token_mint_bump],
+        ];
+        
         create_2022_token(
             ctx.accounts.user,
             ctx.accounts.cook_pda,
             ctx.accounts.base_token_program,
             pda_sol_bump_seed,
+            ctx.accounts.system_program,
+            ctx.accounts.associated_token, // ✅ Pass associated_token_program for Token-2022 ATA creation
             ctx.accounts.base_token_mint,
             ctx.accounts.cook_base_token,
             ctx.accounts.cook_pda,
             token_config,
             args.transfer_fee,
             args.max_transfer_fee,
-            ctx.accounts.delegate,
-            ctx.accounts.hook,
+            Some(ctx.accounts.delegate),
+            Some(ctx.accounts.hook),
+            Some(mint_seeds), // ✅ Pass PDA seeds for account creation
+            None, // ✅ None = cook_base_token is an ATA, not a PDA
         )
-        .unwrap();
+        .map_err(|_e| {
+            msg!("Failed to create 2022 token");
+            ProgramError::InvalidAccountData
+        })?;
     } else {
-        msg!("Only T22 supported");
+        // Always use Token-2022 for new launches to ensure metadata is always included
+        msg!("⚠️ Standard SPL Token not supported for new launches - only Token-2022 is supported");
+        msg!("   Token-2022 ensures metadata is always included with the token");
         return Err(ProgramError::InvalidAccountData);
     }
+    
+    // Emit on-chain event for launch creation
+    emit_launch_created_event(
+        ctx.accounts.base_token_mint.key,
+        ctx.accounts.user.key,
+        args.launch_type,
+        args.total_supply,
+        args.ticket_price,
+    );
+    
+    msg!("✅ Launch created successfully!");
     Ok(())
 }

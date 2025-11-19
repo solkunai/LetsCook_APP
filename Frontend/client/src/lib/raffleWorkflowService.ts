@@ -301,20 +301,27 @@ export class RaffleWorkflowService {
       }
 
       // Call the backend token claiming function
-      const signature = await realLaunchService.claimTokens(userPublicKey, raffleId);
+      const claimResult = await realLaunchService.claimTokens(userPublicKey, raffleId, undefined);
+      
+      if (!claimResult.success) {
+        return {
+          success: false,
+          message: claimResult.error || 'Failed to claim tokens',
+          error: 'CLAIM_FAILED'
+        };
+      }
       
       // Check if this is the first claim (triggers liquidity pool deployment)
-      if (state.winnersClaimed === 0) {
+      if (state.winnersClaimed === 0 && state.hasMetThreshold) {
         // Deploy liquidity pool after a short delay
-        setTimeout(() => {
-          this.deployLiquidityPool(raffleId);
-        }, this.POOL_DEPLOYMENT_DELAY);
+        // Note: This would require signTransaction in production
+        console.log('⚠️ Pool deployment triggered but requires signTransaction');
       }
       
       return {
         success: true,
         message: 'Tokens claimed successfully',
-        transactionSignature: signature
+        transactionSignature: claimResult.signature
       };
     } catch (error) {
       console.error('Error claiming tokens:', error);
@@ -327,11 +334,15 @@ export class RaffleWorkflowService {
   }
 
   /**
-   * Deploy liquidity pool automatically
+   * Deploy liquidity pool automatically when threshold is met
+   * Uses poolAutoCreationService for automatic pool creation
    */
-  private static async deployLiquidityPool(raffleId: string): Promise<RaffleWorkflowResult> {
+  private static async deployLiquidityPool(
+    raffleId: string,
+    signTransaction?: (tx: Transaction) => Promise<Transaction>
+  ): Promise<RaffleWorkflowResult> {
     try {
-      console.log(`Deploying liquidity pool for raffle ${raffleId}`);
+      console.log(`🚀 Deploying liquidity pool for raffle ${raffleId}`);
       
       const state = await this.getRaffleWorkflowState(raffleId);
       if (!state) {
@@ -342,21 +353,43 @@ export class RaffleWorkflowService {
         };
       }
 
-      // Calculate liquidity amounts
-      const tokenAmount = state.currentLiquidity; // SOL amount from ticket sales
-      const solAmount = state.currentLiquidity; // Same amount in SOL
-      
-      // Deploy AMM pool
-      const ammData = await realLaunchService.getAMMData(
-        new PublicKey(state.tokenMint),
-        new PublicKey('So11111111111111111111111111111111111111112') // SOL mint
-      );
-
-      if (!ammData) {
+      if (!state.hasMetThreshold) {
         return {
           success: false,
-          message: 'Failed to create AMM data',
-          error: 'AMM_CREATION_FAILED'
+          message: 'Liquidity threshold not met',
+          error: 'THRESHOLD_NOT_MET'
+        };
+      }
+
+      if (!signTransaction) {
+        return {
+          success: false,
+          message: 'Transaction signing required for pool creation',
+          error: 'SIGNATURE_REQUIRED'
+        };
+      }
+
+      // Import pool auto-creation service
+      const { poolAutoCreationService } = await import('./poolAutoCreationService');
+      
+      // Determine DEX provider (default to raydium, but can be configured)
+      const dexProvider: 'cook' | 'raydium' = 'raydium'; // Can be made configurable
+      
+      // Create pool automatically
+      const poolResult = await poolAutoCreationService.checkAndCreatePool(
+        raffleId,
+        state.liquidityThreshold,
+        state.currentLiquidity,
+        dexProvider,
+        undefined, // No lock config for raffles by default
+        signTransaction
+      );
+
+      if (!poolResult || !poolResult.success) {
+        return {
+          success: false,
+          message: poolResult?.error || 'Failed to create pool',
+          error: 'POOL_CREATION_FAILED'
         };
       }
 
@@ -365,15 +398,16 @@ export class RaffleWorkflowService {
       
       return {
         success: true,
-        message: 'Liquidity pool deployed successfully. Trading is now live!',
+        message: `${dexProvider.toUpperCase()} liquidity pool is active. Trading is now live!`,
+        transactionSignature: poolResult.transactionSignature,
         newState: {
           ...state,
           status: 'trading',
-          liquidityPoolAddress: ammData.base_mint.toBase58() // This would be the actual pool address
+          liquidityPoolAddress: poolResult.poolAddress?.toBase58()
         }
       };
     } catch (error) {
-      console.error('Error deploying liquidity pool:', error);
+      console.error('❌ Error deploying liquidity pool:', error);
       return {
         success: false,
         message: 'Failed to deploy liquidity pool',

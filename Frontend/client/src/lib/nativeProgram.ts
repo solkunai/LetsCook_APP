@@ -15,7 +15,7 @@ import { serialize } from 'borsh';
 import * as borsh from '@coral-xyz/borsh';
 
 // Your deployed program ID
-export const PROGRAM_ID = new PublicKey('ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ');
+export const PROGRAM_ID = new PublicKey('J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg');
 
 // Instruction enum matching your Rust program
 export enum LaunchInstruction {
@@ -48,11 +48,13 @@ export enum LaunchInstruction {
   SwapRaydiumClassic = 26,
   InitCookAMMExternal = 27,
   CreateInstantLaunch = 28,
-  AddTradeRewards = 29,
-  ListNFT = 30,
-  UnlistNFT = 31,
-  BuyNFT = 32,
-  UpdateRaffleImages = 33,
+  CreateAmmQuote = 29,
+  CreateAmmBase = 30, // Helper instruction to create amm_base separately
+  AddTradeRewards = 31,
+  ListNFT = 32,
+  UnlistNFT = 33,
+  BuyNFT = 34,
+  UpdateRaffleImages = 35,
 }
 
 // Instruction argument interfaces matching your Rust structs
@@ -131,6 +133,12 @@ export interface PlaceOrderArgs {
   orderType: number;
   clientOrderId: number;
   limit: number;
+  // Launch state fields (passed to avoid deserializing LaunchData in program)
+  isInstantLaunch: number; // 0 = false, 1 = true
+  isGraduated: number;       // 0 = false, 1 = true
+  tokensSold: number;        // Current tokens sold for bonding curve
+  totalSupply: number;       // Total supply for creator limit check
+  creatorKey: string;        // Creator pubkey for limit check
 }
 
 export interface RaydiumSwapArgs {
@@ -293,6 +301,11 @@ const instantLaunchArgsSchema = {
     launch_type: 'u8',
     whitelist_tokens: 'u64',
     whitelist_end: 'u64',
+    description: 'string',
+    website: 'string',
+    twitter: 'string',
+    telegram: 'string',
+    discord: 'string',
   }
 };
 
@@ -333,16 +346,62 @@ function serializeInstruction(instruction: LaunchInstruction, args?: any): Buffe
         console.log('🔍 Serializing InstantLaunchArgs (instant):', args);
         console.log('🔍 Args type check:', typeof args);
         console.log('🔍 Args keys:', Object.keys(args));
+        
+        // CRITICAL: Ensure total_supply is a proper integer and log it
+        if (args && 'total_supply' in args) {
+          const originalSupply = args.total_supply;
+          const supplyType = typeof originalSupply;
+          console.log('💰 Total supply before serialization:', {
+            value: originalSupply,
+            type: supplyType,
+            isInteger: Number.isInteger(originalSupply),
+            isSafeInteger: Number.isSafeInteger(originalSupply),
+            stringValue: String(originalSupply),
+          });
+          
+          // Ensure it's a safe integer
+          if (!Number.isSafeInteger(originalSupply)) {
+            console.error('❌ Total supply is not a safe integer!', originalSupply);
+            // Try to convert from string or BigInt
+            if (typeof originalSupply === 'string') {
+              args.total_supply = parseInt(originalSupply, 10);
+              console.log('✅ Converted from string:', args.total_supply);
+            } else if (typeof originalSupply === 'bigint') {
+              if (originalSupply > BigInt(Number.MAX_SAFE_INTEGER)) {
+                throw new Error(`Total supply ${originalSupply} exceeds safe integer range`);
+              }
+              args.total_supply = Number(originalSupply);
+              console.log('✅ Converted from BigInt:', args.total_supply);
+            } else {
+              throw new Error(`Invalid total_supply type: ${supplyType}, value: ${originalSupply}`);
+            }
+          }
+          
+          // Final validation
+          if (!Number.isInteger(args.total_supply) || args.total_supply <= 0) {
+            throw new Error(`Invalid total_supply: ${args.total_supply}`);
+          }
+          
+          console.log('✅ Total supply validated:', args.total_supply);
+        }
+        
         try {
           const argsBuffer = Buffer.from(serialize(instantLaunchArgsSchema, args));
           console.log('🔍 Serialized buffer length:', argsBuffer.length);
-          console.log('🔍 Serialized buffer (first 50 bytes):', Array.from(argsBuffer.slice(0, 50)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+          
+          // Extract and verify total_supply from serialized buffer
+          // total_supply is after: name, symbol, uri, icon, banner (all strings with 4-byte length prefix)
+          // We need to find where total_supply starts (it's a u64 = 8 bytes)
+          // For now, just log the buffer
+          console.log('🔍 Serialized buffer (first 100 bytes):', Array.from(argsBuffer.slice(0, 100)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+          
           const finalBuffer = Buffer.concat([instructionIndex, argsBuffer]);
           console.log('🔍 Final instruction buffer length:', finalBuffer.length);
           return finalBuffer;
         } catch (error) {
           console.error('❌ Serialization error:', error);
           console.error('❌ Args that failed:', args);
+          console.error('❌ Total supply in failed args:', args?.total_supply);
           throw error;
         }
       } else if (instruction === LaunchInstruction.UpdateRaffleImages) {
@@ -374,18 +433,21 @@ export class LetsCookProgram {
   // Initialize the program
   static createInitInstruction(
     user: PublicKey,
+    programData: PublicKey,
+    systemProgram: PublicKey,
     cookData: PublicKey,
-    cookPda: PublicKey,
-    systemProgram: PublicKey = SystemProgram.programId
+    cookPda: PublicKey
   ): TransactionInstruction {
     const data = serializeInstruction(LaunchInstruction.Init);
     
+    // Backend expects 5 accounts in this order: user, program_data, system_program, cook_data, cook_pda
     return new TransactionInstruction({
       keys: [
-        { pubkey: user, isSigner: true, isWritable: true },
-        { pubkey: cookData, isSigner: false, isWritable: true },
-        { pubkey: cookPda, isSigner: false, isWritable: true },
-        { pubkey: systemProgram, isSigner: false, isWritable: false },
+        { pubkey: user, isSigner: true, isWritable: true },              // 0: user
+        { pubkey: programData, isSigner: false, isWritable: true },      // 1: program_data
+        { pubkey: systemProgram, isSigner: false, isWritable: false },   // 2: system_program
+        { pubkey: cookData, isSigner: false, isWritable: true },         // 3: cook_data
+        { pubkey: cookPda, isSigner: false, isWritable: true },          // 4: cook_pda
       ],
       programId: PROGRAM_ID,
       data,
@@ -399,49 +461,48 @@ export class LetsCookProgram {
       user: PublicKey;
       listing: PublicKey;
       launchData: PublicKey;
+      team: PublicKey;
+      baseTokenMint: PublicKey;
       quoteTokenMint: PublicKey;
-      launchQuote: PublicKey;
       cookData: PublicKey;
       cookPda: PublicKey;
-      baseTokenMint: PublicKey;
+      launchQuote: PublicKey;
       cookBaseToken: PublicKey;
-      team: PublicKey;
-      whitelist?: PublicKey;
-      quoteTokenProgram: PublicKey;
-      baseTokenProgram: PublicKey;
-      associatedToken: PublicKey;
       systemProgram: PublicKey;
+      tokenProgram: PublicKey;
+      token2022Program: PublicKey;
+      baseTokenProgram: PublicKey;
+      quoteTokenProgram: PublicKey;
+      associatedToken: PublicKey;
+      whitelist?: PublicKey;
       delegate?: PublicKey;
       hook?: PublicKey;
     }
   ): TransactionInstruction {
     const data = serializeInstruction(LaunchInstruction.CreateLaunch, args);
     
+    // Backend expects 19 accounts in this exact order:
     const keys = [
-      { pubkey: accounts.user, isSigner: true, isWritable: true },
-      { pubkey: accounts.listing, isSigner: false, isWritable: true },
-      { pubkey: accounts.launchData, isSigner: false, isWritable: true },
-      { pubkey: accounts.quoteTokenMint, isSigner: false, isWritable: true },
-      { pubkey: accounts.launchQuote, isSigner: false, isWritable: true },
-      { pubkey: accounts.cookData, isSigner: false, isWritable: true },
-      { pubkey: accounts.cookPda, isSigner: false, isWritable: true },
-      { pubkey: accounts.baseTokenMint, isSigner: false, isWritable: true },
-      { pubkey: accounts.cookBaseToken, isSigner: false, isWritable: true },
-      { pubkey: accounts.team, isSigner: false, isWritable: true },
-      { pubkey: accounts.whitelist || SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: accounts.quoteTokenProgram, isSigner: false, isWritable: false },
-      { pubkey: accounts.baseTokenProgram, isSigner: false, isWritable: false },
-      { pubkey: accounts.associatedToken, isSigner: false, isWritable: false },
-      { pubkey: accounts.systemProgram, isSigner: false, isWritable: false },
+      { pubkey: accounts.user, isSigner: true, isWritable: true },              // 0: user
+      { pubkey: accounts.listing, isSigner: false, isWritable: true },          // 1: listing
+      { pubkey: accounts.launchData, isSigner: false, isWritable: true },       // 2: launch_data
+      { pubkey: accounts.team, isSigner: false, isWritable: true },            // 3: team
+      { pubkey: accounts.baseTokenMint, isSigner: false, isWritable: true },    // 4: base_token_mint
+      { pubkey: accounts.quoteTokenMint, isSigner: false, isWritable: true },   // 5: quote_token_mint
+      { pubkey: accounts.cookData, isSigner: false, isWritable: true },         // 6: cook_data
+      { pubkey: accounts.cookPda, isSigner: false, isWritable: true },          // 7: cook_pda
+      { pubkey: accounts.launchQuote, isSigner: false, isWritable: true },      // 8: launch_quote
+      { pubkey: accounts.cookBaseToken, isSigner: false, isWritable: true },    // 9: cook_base_token
+      { pubkey: accounts.systemProgram, isSigner: false, isWritable: false },  // 10: system_program
+      { pubkey: accounts.tokenProgram, isSigner: false, isWritable: false },   // 11: token_program
+      { pubkey: accounts.token2022Program, isSigner: false, isWritable: false }, // 12: token_2022_program
+      { pubkey: accounts.baseTokenProgram, isSigner: false, isWritable: false }, // 13: base_token_program
+      { pubkey: accounts.quoteTokenProgram, isSigner: false, isWritable: false }, // 14: quote_token_program
+      { pubkey: accounts.associatedToken, isSigner: false, isWritable: false }, // 15: associated_token
+      { pubkey: accounts.whitelist || SystemProgram.programId, isSigner: false, isWritable: false }, // 16: whitelist
+      { pubkey: accounts.delegate || SystemProgram.programId, isSigner: false, isWritable: false }, // 17: delegate
+      { pubkey: accounts.hook || SystemProgram.programId, isSigner: false, isWritable: false },     // 18: hook
     ];
-
-    if (accounts.delegate) {
-      keys.push({ pubkey: accounts.delegate, isSigner: false, isWritable: false });
-    }
-
-    if (accounts.hook) {
-      keys.push({ pubkey: accounts.hook, isSigner: false, isWritable: false });
-    }
 
     return new TransactionInstruction({
       keys,
@@ -457,49 +518,76 @@ export class LetsCookProgram {
       user: PublicKey;
       listing: PublicKey;
       launchData: PublicKey;
+      baseTokenMint: PublicKey;
       quoteTokenMint: PublicKey;
-      launchQuote: PublicKey;
       cookData: PublicKey;
       cookPda: PublicKey;
-      baseTokenMint: PublicKey;
-      cookBaseToken: PublicKey;
-      team: PublicKey;
-      whitelist?: PublicKey;
-      quoteTokenProgram: PublicKey;
-      baseTokenProgram: PublicKey;
-      associatedToken: PublicKey;
+      amm: PublicKey;
+      ammQuote: PublicKey;
+      lpTokenMint: PublicKey;
       systemProgram: PublicKey;
-      delegate?: PublicKey;
-      hook?: PublicKey;
+      baseTokenProgram: PublicKey;
+      quoteTokenProgram: PublicKey;
+      priceData: PublicKey;
+      associatedToken: PublicKey;
+      cookBaseToken: PublicKey; // ATA for cook_pda to hold initial token supply
+      ammBase: PublicKey;
+      userData: PublicKey;
     }
   ): TransactionInstruction {
     const data = serializeInstruction(LaunchInstruction.CreateInstantLaunch, args);
     
+    // Backend expects 18 accounts in this exact order:
     const keys = [
-      { pubkey: accounts.user, isSigner: true, isWritable: true },
-      { pubkey: accounts.listing, isSigner: false, isWritable: true },
-      { pubkey: accounts.launchData, isSigner: false, isWritable: true },
-      { pubkey: accounts.quoteTokenMint, isSigner: false, isWritable: true },
-      { pubkey: accounts.launchQuote, isSigner: false, isWritable: true },
-      { pubkey: accounts.cookData, isSigner: false, isWritable: true },
-      { pubkey: accounts.cookPda, isSigner: false, isWritable: true },
-      { pubkey: accounts.baseTokenMint, isSigner: false, isWritable: true },
-      { pubkey: accounts.cookBaseToken, isSigner: false, isWritable: true },
-      { pubkey: accounts.team, isSigner: false, isWritable: true },
-      { pubkey: accounts.whitelist || SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: accounts.quoteTokenProgram, isSigner: false, isWritable: false },
-      { pubkey: accounts.baseTokenProgram, isSigner: false, isWritable: false },
-      { pubkey: accounts.associatedToken, isSigner: false, isWritable: false },
-      { pubkey: accounts.systemProgram, isSigner: false, isWritable: false },
+      { pubkey: accounts.user, isSigner: true, isWritable: true },              // 0: user
+      { pubkey: accounts.listing, isSigner: false, isWritable: true },          // 1: listing
+      { pubkey: accounts.launchData, isSigner: false, isWritable: true },       // 2: launch_data
+      { pubkey: accounts.baseTokenMint, isSigner: false, isWritable: true },   // 3: base_token_mint
+      { pubkey: accounts.quoteTokenMint, isSigner: false, isWritable: true },    // 4: quote_token_mint
+      { pubkey: accounts.cookData, isSigner: false, isWritable: true },         // 5: cook_data
+      { pubkey: accounts.cookPda, isSigner: false, isWritable: true },          // 6: cook_pda
+      { pubkey: accounts.amm, isSigner: false, isWritable: true },             // 7: amm
+      { pubkey: accounts.ammQuote, isSigner: true, isWritable: true },        // 8: amm_quote (signer for Alternative 4)
+      { pubkey: accounts.lpTokenMint, isSigner: false, isWritable: true },     // 9: lp_token_mint
+      { pubkey: accounts.systemProgram, isSigner: false, isWritable: false },  // 10: system_program
+      { pubkey: accounts.baseTokenProgram, isSigner: false, isWritable: false }, // 11: base_token_program
+      { pubkey: accounts.quoteTokenProgram, isSigner: false, isWritable: false }, // 12: quote_token_program
+      { pubkey: accounts.priceData, isSigner: false, isWritable: true },         // 13: price_data
+      { pubkey: accounts.associatedToken, isSigner: false, isWritable: false }, // 14: associated_token
+      { pubkey: accounts.cookBaseToken, isSigner: false, isWritable: true },  // 15: cook_base_token (ATA for cook_pda)
+      { pubkey: accounts.ammBase, isSigner: false, isWritable: true },        // 16: amm_base (PDA - signed by backend with PDA seeds)
+      { pubkey: accounts.userData, isSigner: false, isWritable: true },         // 17: user_data
     ];
 
-    if (accounts.delegate) {
-      keys.push({ pubkey: accounts.delegate, isSigner: false, isWritable: false });
-    }
+    return new TransactionInstruction({
+      keys,
+      programId: PROGRAM_ID,
+      data,
+    });
+  }
 
-    if (accounts.hook) {
-      keys.push({ pubkey: accounts.hook, isSigner: false, isWritable: false });
+  // Create AMM quote token account (helper instruction)
+  static createAmmQuoteInstruction(
+    accounts: {
+      user: PublicKey;
+      amm: PublicKey;
+      ammQuote: PublicKey;
+      quoteTokenMint: PublicKey;
+      quoteTokenProgram: PublicKey;
+      systemProgram: PublicKey;
     }
+  ): TransactionInstruction {
+    const data = serializeInstruction(LaunchInstruction.CreateAmmQuote);
+    
+    // Backend expects 5 accounts in main list, then amm_quote in remaining_accounts:
+    const keys = [
+      { pubkey: accounts.user, isSigner: true, isWritable: true },              // 0: user
+      { pubkey: accounts.amm, isSigner: false, isWritable: false },             // 1: amm
+      { pubkey: accounts.quoteTokenMint, isSigner: false, isWritable: false },   // 2: quote_token_mint
+      { pubkey: accounts.quoteTokenProgram, isSigner: false, isWritable: false }, // 3: quote_token_program
+      { pubkey: accounts.systemProgram, isSigner: false, isWritable: false },    // 4: system_program
+      { pubkey: accounts.ammQuote, isSigner: false, isWritable: true },        // 5: amm_quote (remaining_accounts)
+    ];
 
     return new TransactionInstruction({
       keys,
@@ -866,6 +954,85 @@ export class LetsCookProgram {
       ],
       programId: PROGRAM_ID,
       data: argsBuffer,
+    });
+  }
+
+  /**
+   * Create Raydium pool instruction
+   * Creates a Raydium liquidity pool with specified amounts
+   */
+  static createRaydiumPoolInstruction(
+    args: { amount_0: number; amount_1: number },
+    accounts: {
+      user: PublicKey;
+      tokenMintA: PublicKey;
+      tokenMintB: PublicKey;
+      poolState: PublicKey;
+      poolAuthority: PublicKey;
+      poolTokenVaultA: PublicKey;
+      poolTokenVaultB: PublicKey;
+      lpMint: PublicKey;
+      tokenProgram: PublicKey;
+      systemProgram: PublicKey;
+    }
+  ): TransactionInstruction {
+    // Serialize CreateRaydiumArgs: { amount_0: u64, amount_1: u64 }
+    const argsBuffer = Buffer.alloc(16); // 8 + 8 bytes
+    argsBuffer.writeBigUInt64LE(BigInt(args.amount_0), 0);
+    argsBuffer.writeBigUInt64LE(BigInt(args.amount_1), 8);
+    
+    // Serialize instruction: variant index (1 byte) + args (16 bytes)
+    const instructionIndex = Buffer.alloc(1);
+    instructionIndex.writeUInt8(LaunchInstruction.CreateRaydium, 0);
+    const data = Buffer.concat([instructionIndex, argsBuffer]);
+    
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: accounts.user, isSigner: true, isWritable: true },              // 0: user
+        { pubkey: accounts.tokenMintA, isSigner: false, isWritable: false },      // 1: token_mint_a
+        { pubkey: accounts.tokenMintB, isSigner: false, isWritable: false },      // 2: token_mint_b
+        { pubkey: accounts.poolState, isSigner: false, isWritable: true },         // 3: pool_state
+        { pubkey: accounts.poolAuthority, isSigner: false, isWritable: false },    // 4: pool_authority
+        { pubkey: accounts.poolTokenVaultA, isSigner: false, isWritable: true },   // 5: pool_token_vault_a
+        { pubkey: accounts.poolTokenVaultB, isSigner: false, isWritable: true },   // 6: pool_token_vault_b
+        { pubkey: accounts.lpMint, isSigner: false, isWritable: true },           // 7: lp_mint
+        { pubkey: accounts.tokenProgram, isSigner: false, isWritable: false },    // 8: token_program
+        { pubkey: accounts.systemProgram, isSigner: false, isWritable: false },   // 9: system_program
+      ],
+      programId: PROGRAM_ID,
+      data,
+    });
+  }
+
+  /**
+   * Create amm_base token account instruction
+   * Helper instruction to create amm_base separately (useful for fixing launches)
+   */
+  static createAmmBaseInstruction(
+    accounts: {
+      user: PublicKey;
+      ammBase: PublicKey;
+      amm: PublicKey;
+      baseTokenMint: PublicKey;
+      baseTokenProgram: PublicKey;
+      systemProgram: PublicKey;
+    }
+  ): TransactionInstruction {
+    // Serialize instruction: variant index (1 byte) only, no args
+    const instructionIndex = Buffer.alloc(1);
+    instructionIndex.writeUInt8(LaunchInstruction.CreateAmmBase, 0);
+    
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: accounts.user, isSigner: true, isWritable: true },              // 0: user
+        { pubkey: accounts.ammBase, isSigner: true, isWritable: true },           // 1: amm_base (signer for keypair)
+        { pubkey: accounts.amm, isSigner: false, isWritable: false },             // 2: amm
+        { pubkey: accounts.baseTokenMint, isSigner: false, isWritable: false },   // 3: base_token_mint
+        { pubkey: accounts.baseTokenProgram, isSigner: false, isWritable: false }, // 4: base_token_program
+        { pubkey: accounts.systemProgram, isSigner: false, isWritable: false },   // 5: system_program
+      ],
+      programId: PROGRAM_ID,
+      data: instructionIndex,
     });
   }
 }

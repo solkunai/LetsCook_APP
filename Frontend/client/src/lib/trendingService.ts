@@ -89,7 +89,7 @@ export class TrendingService {
     try {
       // Fetch real raffle data from blockchain
       const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
       
       // Get all program accounts
       const accounts = await connection.getProgramAccounts(programId, {
@@ -150,7 +150,7 @@ export class TrendingService {
     try {
       // Fetch real token data from blockchain
       const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
       
       // Get all program accounts
       const accounts = await connection.getProgramAccounts(programId, {

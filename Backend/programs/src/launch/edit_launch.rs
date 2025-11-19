@@ -109,13 +109,9 @@ pub fn edit_launch<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], arg
         ctx.accounts.quote_token_program,
         ctx.accounts.base_token_program,
         program_id,
-        amm_bump_seed,
-        args.amm_fee,
         launch_data.flags[LaunchFlags::AMMProvider as usize],
-        args.distribution[Distribution::MMRewards as usize],
         ctx.accounts.trade_to_earn,
         trade_to_earn_bump,
-        false,
     )?;
 
     launch_data.flags[LaunchFlags::LPState as usize] = 1;

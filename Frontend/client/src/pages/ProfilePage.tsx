@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,17 +9,18 @@ import { toast } from "@/hooks/use-toast";
 import TicketCard from "@/components/TicketCard";
 import SaucePointsBadge from "@/components/SaucePointsBadge";
 import { User, Wallet, Copy, CheckCircle, Gift, Share2 } from "lucide-react";
+import { useWallet } from '@solana/wallet-adapter-react';
+import { referralService } from '@/lib/referralService';
 
-// todo: remove mock functionality
-const mockUser = {
-  username: "chef_master",
-  walletAddress: "9xQe...7mK3",
-  saucePoints: 750,
-  referralCode: "CHEF1",
-  referralLink: "https://letscook.com/ref/CHEF1",
-  totalReferrals: 12,
-  referralEarnings: 2.5,
-};
+interface ReferralState {
+  username: string;
+  walletAddress: string;
+  referralCode: string;
+  referralLink: string;
+  totalReferrals: number;
+  referralEarnings: number; // display only, from referralData.totalEarnings
+  saucePoints: number; // optional display, keep 0 for now
+}
 
 const mockActiveTickets = [
   {
@@ -56,9 +57,33 @@ const mockPastTickets = [
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState("active");
-  const [referralCode, setReferralCode] = useState(mockUser.referralCode);
+  const { publicKey } = useWallet();
+  const [user, setUser] = useState<ReferralState | null>(null);
+  const [referralCode, setReferralCode] = useState("");
   const [isEditingReferralCode, setIsEditingReferralCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!publicKey) return;
+      const data = await referralService.getReferralData(publicKey);
+      const username = localStorage.getItem('username') || data.referredFriends.find(() => false)?.username || '';
+      const walletAddress = publicKey.toBase58().slice(0, 4) + '...' + publicKey.toBase58().slice(-4);
+      const baseUrl = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+      const referralLink = `${baseUrl}?ref=${data.referralCode}`;
+      setUser({
+        username,
+        walletAddress,
+        referralCode: data.referralCode,
+        referralLink,
+        totalReferrals: data.referredCount,
+        referralEarnings: data.totalEarnings,
+        saucePoints: data.pointsEarned,
+      });
+      setReferralCode(data.referralCode);
+    };
+    load();
+  }, [publicKey]);
 
   const validateReferralCode = (code: string): boolean => {
     // Only allow letters and numbers, up to 5 characters
@@ -83,9 +108,14 @@ export default function ProfilePage() {
       return;
     }
 
-    // Here you would save to backend
-    mockUser.referralCode = referralCode;
-    mockUser.referralLink = `https://letscook.com/ref/${referralCode}`;
+    // Future: custom code persistence
+    if (user) {
+      setUser({
+        ...user,
+        referralCode,
+        referralLink: `${((import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : ''))}?ref=${referralCode}`,
+      });
+    }
     
     setIsEditingReferralCode(false);
     toast({
@@ -96,7 +126,8 @@ export default function ProfilePage() {
 
   const copyReferralLink = async () => {
     try {
-      await navigator.clipboard.writeText(mockUser.referralLink);
+      if (!user) return;
+      await navigator.clipboard.writeText(user.referralLink);
       setCopiedCode(true);
       toast({
         title: "Copied!",
@@ -120,16 +151,16 @@ export default function ProfilePage() {
           <div className="flex items-center gap-4 mb-4">
             <Avatar className="w-16 h-16 border-2 border-primary shadow-xl">
               <AvatarFallback className="bg-primary text-primary-foreground text-xl font-bold">
-                {mockUser.username[0].toUpperCase()}
+                {(user?.username || 'U')[0].toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1">
               <h1 className="text-2xl font-heading font-bold" data-testid="text-username">
-                {mockUser.username}
+                {user?.username || 'Anonymous Chef'}
               </h1>
               <div className="flex items-center gap-2 text-sm text-muted-foreground font-medium">
                 <Wallet className="w-4 h-4" />
-                <span data-testid="text-wallet-address">{mockUser.walletAddress}</span>
+                <span data-testid="text-wallet-address">{user?.walletAddress || ''}</span>
               </div>
             </div>
           </div>
@@ -137,7 +168,7 @@ export default function ProfilePage() {
           <Card className="bg-card/80 backdrop-blur-sm p-4 border-primary/20">
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold">Degen Level</span>
-              <SaucePointsBadge points={mockUser.saucePoints} />
+              <SaucePointsBadge points={user?.saucePoints || 0} />
             </div>
           </Card>
 
@@ -186,7 +217,7 @@ export default function ProfilePage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <code className="bg-primary/10 text-primary px-2 py-1 rounded text-sm font-mono">
-                      {mockUser.referralCode}
+                      {user?.referralCode || ''}
                     </code>
                     <Button
                       variant="ghost"
@@ -203,8 +234,8 @@ export default function ProfilePage() {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     <div className="flex items-center gap-4">
-                      <span>{mockUser.totalReferrals} referrals</span>
-                      <span>{mockUser.referralEarnings} SOL earned</span>
+                      <span>{user?.totalReferrals ?? 0} referrals</span>
+                      <span>{(user?.referralEarnings ?? 0).toFixed(2)} SOL earned</span>
                     </div>
                   </div>
                 </div>
@@ -266,7 +297,7 @@ export default function ProfilePage() {
                 <div className="bg-primary/10 rounded-lg p-4 text-center">
                   <div className="flex items-center justify-center gap-2 mb-2">
                     <code className="text-lg font-mono font-bold text-primary">
-                      {mockUser.referralCode}
+                      {user?.referralCode || ''}
                     </code>
                     <Button
                       variant="ghost"
@@ -282,7 +313,7 @@ export default function ProfilePage() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {mockUser.referralLink}
+                    {user?.referralLink || ''}
                   </p>
                 </div>
 
@@ -301,11 +332,11 @@ export default function ProfilePage() {
                   className="w-full" 
                   onClick={() => {
                     // Share functionality
-                    if (navigator.share) {
+                    if (navigator.share && user) {
                       navigator.share({
                         title: 'Join Let\'s Cook with my referral code!',
-                        text: `Use my referral code ${mockUser.referralCode} to join Let's Cook!`,
-                        url: mockUser.referralLink,
+                        text: `Use my referral code ${user.referralCode} to join Let's Cook!`,
+                        url: user.referralLink,
                       });
                     } else {
                       copyReferralLink();

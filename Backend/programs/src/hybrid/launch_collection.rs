@@ -3,10 +3,10 @@ use borsh::{to_vec, BorshSerialize};
 use solana_program::{account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError, pubkey::Pubkey};
 
 use crate::hybrid::{
-    CollectionData, CollectionKeys, CollectionMeta, CollectionMetaType, CollectionPlugin, MintProbability, RandomFixedSupply, RandomUnlimited,
+    CollectionData, CollectionKeys, CollectionMeta, CollectionPlugin, MintProbability, RandomFixedSupply, RandomUnlimited,
     WhiteListToken,
 };
-use crate::instruction::LaunchCollectionArgs;
+use crate::instruction::{self, LaunchCollectionArgs};
 use crate::{accounts, instruction::accounts::LaunchCollectionAccounts, launch};
 
 use crate::state;
@@ -41,7 +41,7 @@ pub fn launch_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>
     msg!("create game account");
 
     let collection_meta: CollectionMeta = match args.collection_type {
-        CollectionMetaType::RandomFixedSupply => {
+        0 => { // CollectionMetaType::RandomFixedSupply
             let mut availability_len: usize = (args.collection_size / 4 + 2) as usize;
             if availability_len % 2 != 0 {
                 availability_len += 1;
@@ -57,7 +57,13 @@ pub fn launch_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>
 
             CollectionMeta::RandomFixedSupply(state)
         }
-        CollectionMetaType::RandomUnlimited => CollectionMeta::RandomUnlimited(RandomUnlimited {}),
+        1 => { // CollectionMetaType::RandomUnlimited
+            CollectionMeta::RandomUnlimited(RandomUnlimited {})
+        }
+        _ => {
+            msg!("Invalid collection type");
+            return Err(ProgramError::InvalidArgument);
+        }
     };
 
     let mut launch_data = CollectionData {
@@ -80,14 +86,14 @@ pub fn launch_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>
         nft_icon_url: args.nft_icon,
         nft_meta_url: args.nft_uri,
         nft_name: args.nft_name,
-        nft_type: args.nft_type,
+        nft_type: args.nft_type.to_string(),
 
         banner_url: args.banner,
         description: "".to_string(),
         page_name: args.page_name,
-        total_supply: args.collection_size,
+        total_supply: args.collection_size as u32,
         swap_fee: args.swap_fee,
-        num_available: args.collection_size,
+        num_available: args.collection_size as u32,
         swap_price: args.swap_price,
         positive_votes: 0,
         negative_votes: 0,
@@ -102,15 +108,15 @@ pub fn launch_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>
 
     if args.nft_probability > 0 {
         let plugin = CollectionPlugin::MintProbability(MintProbability {
-            mint_prob: args.nft_probability,
+            mint_prob: args.nft_probability as u16,
         });
 
         launch_data.plugins.push(plugin);
     }
 
-    if ctx.accounts.whitelist_mint.is_some() {
+    if **ctx.accounts.whitelist_mint.try_borrow_lamports()? > 0 {
         let plugin = CollectionPlugin::WhiteListToken(WhiteListToken {
-            key: *ctx.accounts.whitelist_mint.unwrap().key,
+            key: *ctx.accounts.whitelist_mint.key,
             quantity: args.whitelist_tokens,
             phase_end: args.whitelist_end,
         });
@@ -157,6 +163,17 @@ pub fn launch_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>
         pda: accounts::SOL_SEED,
     };
 
+    // Parse attributes from bytes
+    use borsh::BorshDeserialize;
+    let attributes: Vec<instruction::Attribute> = if args.attributes.len() > 0 {
+        match Vec::<instruction::Attribute>::try_from_slice(&args.attributes) {
+            Ok(attrs) => attrs,
+            Err(_) => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+
     // mint the token
     mint_collection(
         ctx.accounts.user,
@@ -167,7 +184,7 @@ pub fn launch_collection<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>
         ctx.accounts.team,
         ctx.accounts.collection,
         collection_config,
-        args.attributes,
+        attributes,
     )
     .unwrap();
 

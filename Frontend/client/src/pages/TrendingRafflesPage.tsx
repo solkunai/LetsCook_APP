@@ -329,7 +329,7 @@ const TrendingRafflesList: React.FC<{ raffles: LaunchData[]; loading: boolean }>
                     <div className="flex items-center space-x-6 text-sm text-slate-400">
                       <div className="flex items-center space-x-1">
                         <Ticket className="w-4 h-4" />
-                        <span>Tickets: {raffle.soldTickets || 0} / {raffle.maxTickets || 1000}</span>
+                        <span>Tickets: {raffle.soldTickets || 0}{raffle.maxTickets > 0 ? ` / ${raffle.maxTickets}` : ' (unlimited)'}</span>
                       </div>
                       <div className="flex items-center space-x-1">
                         <DollarSign className="w-4 h-4" />
@@ -349,7 +349,7 @@ const TrendingRafflesList: React.FC<{ raffles: LaunchData[]; loading: boolean }>
                     {raffle.ticketPrice?.toFixed(4) || '0.0000'} SOL
                   </div>
                   <div className="text-sm text-slate-400">
-                    Progress: {Math.round(((raffle.soldTickets || 0) / (raffle.maxTickets || 1000)) * 100)}%
+                    Progress: {raffle.maxTickets > 0 ? Math.round(((raffle.soldTickets || 0) / raffle.maxTickets) * 100) : 0}%
                   </div>
                 </div>
               </div>

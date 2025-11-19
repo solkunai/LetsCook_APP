@@ -54,7 +54,7 @@ export class RaffleBlockchainService {
   constructor() {
     this.connection = getSimpleConnection();
     this.PROGRAM_ID = new PublicKey(
-      import.meta.env.VITE_MAIN_PROGRAM_ID || 'ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ'
+      import.meta.env.VITE_MAIN_PROGRAM_ID || 'J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg'
     );
   }
 
@@ -172,7 +172,8 @@ export class RaffleBlockchainService {
           down: parsedData.downvotes,
         },
         // Additional fields for RaffleDetailPage
-        maxTickets: parsedData.totalSupply || 1000,
+        // Use numMints from blockchain (creator's input) - 0 means unlimited
+        maxTickets: parsedData.numMints || 0,
         soldTickets: parsedData.ticketsSold || 0,
         raffleDuration: Math.floor((parsedData.endDate.getTime() - parsedData.launchDate.getTime()) / 1000 / 60 / 60), // duration in hours
         winnerCount: parsedData.mintsWon || 0,

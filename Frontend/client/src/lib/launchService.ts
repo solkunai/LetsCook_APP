@@ -15,9 +15,10 @@ export class LaunchService {
 
   /**
    * Fetch all launches from the blockchain
+   * @param forceRefresh - If true, bypasses cache and fetches fresh data
    */
-  async fetchAllLaunches(): Promise<LaunchData[]> {
-    return launchDataService.getAllLaunches();
+  async fetchAllLaunches(forceRefresh: boolean = false): Promise<LaunchData[]> {
+    return launchDataService.getAllLaunches(forceRefresh);
   }
 
   /**

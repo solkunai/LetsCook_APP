@@ -255,15 +255,15 @@ pub fn claim_nft<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], args:
                 // check the launch/end dates are sane
                 let clock = Clock::get()?;
                 if whitelist.phase_end == 0 || (whitelist.phase_end > 0 && (clock.unix_timestamp as u64) < whitelist.phase_end / 1000) {
-                    if *ctx.accounts.whitelist_mint.unwrap().key != whitelist.key {
+                    if *ctx.accounts.whitelist_mint.key != whitelist.key {
                         msg!("Incorrect whitelist mint");
                         return Err(ProgramError::InvalidAccountData);
                     }
                     utils::burn(
                         whitelist.quantity as u64,
-                        ctx.accounts.whitelist_token_program.unwrap(),
-                        ctx.accounts.whitelist_mint.unwrap(),
-                        ctx.accounts.whitelist_account.unwrap(),
+                        ctx.accounts.whitelist_token_program,
+                        ctx.accounts.whitelist_mint,
+                        ctx.accounts.whitelist_account,
                         ctx.accounts.user,
                         0,
                         &Vec::new(),

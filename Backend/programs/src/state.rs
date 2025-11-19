@@ -15,7 +15,16 @@ pub enum Network {
     Eclipse = 2,
 }
 
+// Network is determined at compile time via feature flags
+// Use: cargo build --features mainnet or --features eclipse
+#[cfg(feature = "mainnet")]
+pub const NETWORK: Network = Network::Mainnet;
+
+#[cfg(feature = "eclipse")]
 pub const NETWORK: Network = Network::Eclipse;
+
+#[cfg(not(any(feature = "mainnet", feature = "eclipse")))]
+pub const NETWORK: Network = Network::Devnet;
 
 pub const FEE_AMOUNT: u64 = get_fee_amount(NETWORK);
 
@@ -137,6 +146,9 @@ pub struct LaunchData {
     pub upvotes: u32,    // Number of upvotes
     pub downvotes: u32,  // Number of downvotes
     pub is_tradable: bool, // Whether the token can be traded (raffle graduation)
+    pub tokens_sold: u64, // Tokens sold (circulating supply) for instant launches - pump.fun style bonding curve
+    pub is_graduated: bool, // Whether instant launch has graduated to AMM (bonding curve ended)
+    pub graduation_threshold: u64, // Market cap threshold for graduation (in lamports, default ~$85k)
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]

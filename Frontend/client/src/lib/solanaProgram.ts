@@ -4,7 +4,7 @@ import { useWalletConnection } from '@/lib/wallet';
 import * as borsh from 'borsh';
 
 // Program ID from our deployed program - HARDCODED FOR TESTING
-export const PROGRAM_ID = new PublicKey("ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+export const PROGRAM_ID = new PublicKey("J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
 
 // Helper function to generate real instruction discriminators
 // Using Web Crypto API to generate actual SHA256 hashes
@@ -1455,39 +1455,98 @@ export async function buildAddLiquidityTransaction(
   transaction.recentBlockhash = blockhash;
   transaction.feePayer = user;
   
-  // Derive PDAs
-  const [ammPDA] = getAMMPDA(baseMint, quoteMint, PROGRAM_ID);
-  const [userDataPDA] = getUserDataPDA(user, PROGRAM_ID);
-  const [cookDataPDA] = PublicKey.findProgramAddressSync([Buffer.from('Data')], PROGRAM_ID);
-  const [cookPDA] = PublicKey.findProgramAddressSync([Buffer.from('SOL')], PROGRAM_ID);
+  // Derive PDAs - AddCookLiquidity uses baseMint (token) and WSOL (quote)
+  const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+  const tokenMint = baseMint; // The token being added
+  const [ammPDA] = getAMMPDA(tokenMint, WSOL_MINT, PROGRAM_ID);
   
-  // Create instruction data for Add Liquidity
-  const instructionData = Buffer.alloc(100);
+  // Derive LP token mint PDA - uses [amm.key.to_bytes(), b"LP"]
+  const [lpTokenMint] = PublicKey.findProgramAddressSync(
+    [ammPDA.toBuffer(), Buffer.from('LP')],
+    PROGRAM_ID
+  );
+  
+  // Get user's token account (ATA) for base token
+  const { getAssociatedTokenAddress } = await import('@solana/spl-token');
+  const { TOKEN_2022_PROGRAM_ID } = await import('@solana/spl-token');
+  const userTokenAccount = await getAssociatedTokenAddress(
+    tokenMint,
+    user,
+    false,
+    TOKEN_2022_PROGRAM_ID
+  );
+  
+  // Get user's LP token account (ATA) for LP tokens
+  const userLpTokenAccount = await getAssociatedTokenAddress(
+    lpTokenMint,
+    user,
+    false,
+    TOKEN_2022_PROGRAM_ID
+  );
+  
+  // Derive amm_base account (seeded account, same pattern as in instant_launch.rs)
+  // Seed is first 31 chars of AMM PDA + "b"
+  const ammPdaString = ammPDA.toBase58();
+  const ammBaseSeed = ammPdaString.substring(0, 31) + 'b';
+  
+  // Validate seed length (must be <= 32 bytes)
+  if (ammBaseSeed.length > 32) {
+    throw new Error(`amm_base seed too long: ${ammBaseSeed.length} chars (max 32)`);
+  }
+  
+  // Derive cook_pda for base account (same as backend)
+  const SOL_SEED = 59957379;
+  const solSeedBuffer = Buffer.alloc(4);
+  solSeedBuffer.writeUInt32LE(SOL_SEED, 0);
+  const [cookPDA] = PublicKey.findProgramAddressSync(
+    [solSeedBuffer],
+    PROGRAM_ID
+  );
+  
+  // Create amm_base as seeded account (same as backend)
+  let ammBase: PublicKey;
+  try {
+    ammBase = PublicKey.createWithSeed(
+      cookPDA,
+      ammBaseSeed,
+      TOKEN_2022_PROGRAM_ID
+    );
+  } catch (error) {
+    throw new Error(`Failed to create amm_base seeded account: ${error}. Seed: ${ammBaseSeed}, Length: ${ammBaseSeed.length}`);
+  }
+  
+  // User's SOL account (same as user for SOL)
+  const userSolAccount = user;
+  
+  // Create instruction data for AddCookLiquidity
+  // AddCookLiquidity is variant 30 (0-indexed) in LaunchInstruction enum
+  // Borsh serializes enum variants as: variant_index (u8) + args
+  const instructionData = Buffer.alloc(17); // 1 byte discriminator + 8 + 8 for args
   let offset = 0;
   
-  // Add instruction discriminator for Add Liquidity
-  instructionData.writeUInt32LE(0xca8c8e8a, offset);
-  offset += 4;
-  instructionData.writeUInt32LE(0xcb8d8f8b, offset);
-  offset += 4;
+  // Write variant discriminator (22 = AddCookLiquidity, 0-indexed from LaunchInstruction enum)
+  instructionData.writeUInt8(22, offset);
+  offset += 1;
   
-  // Add liquidity parameters
-  instructionData.writeBigUInt64LE(BigInt(amountA), offset);
+  // Serialize AddLiquidityArgs: { amount_0: u64, amount_1: u64 }
+  // amount_0 = SOL amount, amount_1 = token amount
+  instructionData.writeBigUInt64LE(BigInt(amountA), offset); // amount_0 (SOL)
   offset += 8;
-  instructionData.writeBigUInt64LE(BigInt(amountB), offset);
+  instructionData.writeBigUInt64LE(BigInt(amountB), offset); // amount_1 (token)
   offset += 8;
   
   const instruction = new TransactionInstruction({
     keys: [
-      { pubkey: user, isSigner: true, isWritable: true },
-      { pubkey: userDataPDA, isSigner: false, isWritable: true },
-      { pubkey: ammPDA, isSigner: false, isWritable: true },
-      { pubkey: baseMint, isSigner: false, isWritable: true },
-      { pubkey: quoteMint, isSigner: false, isWritable: true },
-      { pubkey: cookDataPDA, isSigner: false, isWritable: false },
-      { pubkey: cookPDA, isSigner: false, isWritable: false },
-      // Add system program
-      { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+      { pubkey: user, isSigner: true, isWritable: true },           // user (0)
+      { pubkey: tokenMint, isSigner: false, isWritable: true },     // token_mint (1)
+      { pubkey: ammPDA, isSigner: false, isWritable: true },        // amm_account (2)
+      { pubkey: userTokenAccount, isSigner: false, isWritable: true }, // user_token_account (3) - base token
+      { pubkey: userSolAccount, isSigner: false, isWritable: true }, // user_sol_account (4)
+      { pubkey: lpTokenMint, isSigner: false, isWritable: true },   // lp_token_mint (5)
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // token_program (6)
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program (7)
+      { pubkey: ammBase, isSigner: false, isWritable: true },       // amm_base (8) - where tokens go
+      { pubkey: userLpTokenAccount, isSigner: false, isWritable: true }, // user_lp_token_account (9) - where LP tokens are minted
     ],
     programId: PROGRAM_ID,
     data: instructionData.slice(0, offset),
@@ -1787,7 +1846,7 @@ export class SolanaProgramService {
         decimals: launchData.decimals,
         launchDate: Math.floor(Date.now() / 1000), // Current timestamp
         closeDate: Math.floor(Date.now() / 1000) + (launchData.launchType === 'raffle' ? (launchData.raffleDuration || 7 * 24 * 60 * 60) : 0), // 7 days default for raffle
-        numMints: launchData.launchType === 'raffle' ? (launchData.maxTickets || 1000) : launchData.totalSupply,
+        numMints: launchData.launchType === 'raffle' ? (launchData.maxTickets || 0) : launchData.totalSupply,
         ticketPrice: launchData.launchType === 'raffle' ? (launchData.ticketPrice || 0.01) : 0,
         pageName: pageName,
         transferFee: 0,

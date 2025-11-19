@@ -9,7 +9,7 @@ import {
 import { getSimpleConnection } from './simpleConnection';
 
 // Program ID from our deployed program
-const PROGRAM_ID = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+const PROGRAM_ID = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
 
 // Simple instruction discriminator for our basic program
 const CREATE_LAUNCH_DISCRIMINATOR = new Uint8Array([0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f, 0x7a, 0x8b]);

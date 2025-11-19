@@ -42,6 +42,9 @@ export interface LaunchData {
   baseTokenMint: string;
   quoteTokenMint: string;
   dexProvider: number; // 0 for Cook, 1 for Raydium
+  tokensSold?: number; // Tokens sold (circulating supply) for instant launches - from LaunchData account
+  isGraduated?: boolean; // Whether instant launch has graduated to AMM (bonding curve ended)
+  graduationThreshold?: number; // Graduation threshold in lamports (default 30 SOL)
   rawMetadata?: {
     tokenName?: string;
     tokenSymbol?: string;
@@ -64,10 +67,11 @@ export class LaunchDataService {
 
   /**
    * Get all launches from blockchain
+   * @param forceRefresh - If true, bypasses cache and fetches fresh data
    */
-  async getAllLaunches(): Promise<LaunchData[]> {
+  async getAllLaunches(forceRefresh: boolean = false): Promise<LaunchData[]> {
     try {
-      const blockchainLaunches = await blockchainIntegrationService.getAllLaunches();
+      const blockchainLaunches = await blockchainIntegrationService.getAllLaunches(forceRefresh);
       
       // If no blockchain launches found, return empty array
       if (blockchainLaunches.length === 0) {
@@ -146,7 +150,7 @@ export class LaunchDataService {
           endDate: launch.endDate,
           creator: launch.creator,
           ticketPrice: launch.ticketPrice,
-          maxTickets: Math.floor(launch.totalSupply / launch.ticketPrice),
+          maxTickets: launch.numMints || 0, // Use creator's input (0 = unlimited)
           soldTickets: Math.floor(launch.participants * 0.8), // Estimate
           winnerCount: Math.floor(launch.participants * 0.1), // Estimate
           hypeScore: launch.upvotes + launch.downvotes,
@@ -159,6 +163,9 @@ export class LaunchDataService {
           baseTokenMint: launch.baseTokenMint || launch.id, // Use actual SPL token mint or fallback to launch account
           quoteTokenMint: 'So11111111111111111111111111111111111111112', // SOL
           dexProvider: 0, // CookDEX
+          tokensSold: launch.tokensSold, // Tokens sold from LaunchData account
+          isGraduated: launch.isGraduated, // Graduation status from LaunchData account
+          graduationThreshold: launch.graduationThreshold, // Graduation threshold from LaunchData account
           rawMetadata: launch.rawMetadata ? {
             tokenName: launch.rawMetadata.tokenName || undefined,
             tokenSymbol: launch.rawMetadata.tokenSymbol || undefined,
@@ -299,7 +306,10 @@ export class LaunchDataService {
         launchDataAccount: blockchainLaunch.accountAddress,
         baseTokenMint: blockchainLaunch.baseTokenMint,
         quoteTokenMint: 'So11111111111111111111111111111111111111112',
-        dexProvider: 0
+        dexProvider: 0,
+        tokensSold: blockchainLaunch.tokensSold, // Tokens sold from LaunchData account
+        isGraduated: blockchainLaunch.isGraduated, // Graduation status from LaunchData account
+        graduationThreshold: blockchainLaunch.graduationThreshold // Graduation threshold from LaunchData account
       };
     } catch (error) {
       console.error('Error fetching launch by ID:', error);

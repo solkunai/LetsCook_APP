@@ -18,12 +18,16 @@ interface PriceData {
 interface PriceChartProps {
   tokenMint: string;
   initialPrice: number;
+  launchType?: 'instant' | 'raffle' | 'ido';
+  totalSupply?: number;
   className?: string;
 }
 
 const PriceChart: React.FC<PriceChartProps> = ({ 
   tokenMint, 
-  initialPrice, 
+  initialPrice,
+  launchType,
+  totalSupply,
   className = '' 
 }) => {
   const [priceData, setPriceData] = useState<PriceData[]>([]);
@@ -76,7 +80,67 @@ const PriceChart: React.FC<PriceChartProps> = ({
     try {
       console.log('📊 Fetching real blockchain price data for:', tokenMint);
       
-      // Get real price history from blockchain
+      // For instant launches, use bonding curve prices
+      if (launchType === 'instant' && totalSupply) {
+        try {
+          const { tokenSupplyService } = await import('@/lib/tokenSupplyService');
+          const { bondingCurveService } = await import('@/lib/bondingCurveService');
+          const { priceIndexerService } = await import('@/lib/priceIndexerService');
+          
+          // Get price history from indexer (uses bonding curve prices)
+          const priceHistory = await priceIndexerService.getPriceHistory(tokenMint, timeframe);
+          
+          if (priceHistory && priceHistory.length > 0) {
+            const formattedData: PriceData[] = priceHistory.map(point => ({
+              timestamp: point.timestamp,
+              price: point.price,
+              volume: point.volume || 0
+            }));
+            
+            setPriceData(formattedData);
+            
+            if (formattedData.length > 0) {
+              const latestPrice = formattedData[formattedData.length - 1].price;
+              setCurrentPrice(latestPrice);
+              setPriceChange(((latestPrice - initialPrice) / initialPrice) * 100);
+            }
+            
+            console.log('✅ Bonding curve price data loaded:', formattedData.length, 'points');
+            setIsLoading(false);
+            return;
+          }
+          
+          // Fallback: generate bonding curve prices
+          const tokensSold = await tokenSupplyService.getTokensSold(tokenMint);
+          const bondingCurveConfig = {
+            totalSupply,
+            curveType: 'linear' as const,
+            basePrice: initialPrice,
+          };
+          
+          // Generate price history based on bonding curve
+          const bondingCurveData = generateBondingCurvePriceHistory(
+            timeframe,
+            tokensSold,
+            bondingCurveConfig
+          );
+          
+          setPriceData(bondingCurveData);
+          if (bondingCurveData.length > 0) {
+            const latestPrice = bondingCurveData[bondingCurveData.length - 1].price;
+            setCurrentPrice(latestPrice);
+            setPriceChange(((latestPrice - initialPrice) / initialPrice) * 100);
+          }
+          
+          console.log('✅ Generated bonding curve price data:', bondingCurveData.length, 'points');
+          setIsLoading(false);
+          return;
+        } catch (error) {
+          console.warn('Error generating bonding curve prices:', error);
+        }
+      }
+      
+      // For raffle launches or if bonding curve fails, use market data
       const blockchainData = await marketDataService.getPriceHistory(tokenMint, timeframe);
       
       // Convert to our format
@@ -112,6 +176,42 @@ const PriceChart: React.FC<PriceChartProps> = ({
     } finally {
       setIsLoading(false);
     }
+  };
+  
+  // Generate bonding curve price history
+  const generateBondingCurvePriceHistory = (
+    timeframe: string,
+    currentTokensSold: number,
+    config: { totalSupply: number; curveType: 'linear'; basePrice: number }
+  ): PriceData[] => {
+    const now = Date.now();
+    const intervals = {
+      '1h': 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000
+    };
+    
+    const interval = intervals[timeframe as keyof typeof intervals];
+    const dataPoints = timeframe === '1h' ? 60 : timeframe === '24h' ? 24 : 7;
+    const step = interval / dataPoints;
+    
+    const { bondingCurveService } = require('@/lib/bondingCurveService');
+    const data: PriceData[] = [];
+    
+    for (let i = 0; i < dataPoints; i++) {
+      const timestamp = now - (dataPoints - i) * step;
+      // Estimate tokens sold at this point in time (linear interpolation)
+      const tokensSoldAtTime = Math.max(0, currentTokensSold * (i / dataPoints));
+      const price = bondingCurveService.calculatePrice(tokensSoldAtTime, config);
+      
+      data.push({
+        timestamp,
+        price,
+        volume: 0 // Volume would need to be tracked separately
+      });
+    }
+    
+    return data;
   };
 
   // Draw chart

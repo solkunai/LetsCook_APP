@@ -1,5 +1,5 @@
 import { Connection, PublicKey, Transaction, SystemProgram } from "@solana/web3.js";
-import { createInitializeMintInstruction, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getMint, getMetadataPointerState, getTokenMetadata } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getMint, getMetadataPointerState, getTokenMetadata } from '@solana/spl-token';
 
 /**
  * SPL Token Metadata Service
@@ -33,23 +33,43 @@ export class SPLTokenMetadataService {
         return { hasMetadata: false };
       }
       
-      // Check if this is a Token-2022 mint
-      const isToken2022 = mintInfo.owner.equals(new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'));
+      // Check if this is a Token-2022 mint or standard SPL Token
+      const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+      const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+      const isToken2022 = mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+      const isStandardToken = mintInfo.owner.equals(TOKEN_PROGRAM_ID);
       
-      if (!isToken2022) {
-        console.log('⚠️ This is not a Token-2022 mint, using standard SPL Token');
-        // For standard SPL tokens, we'd need to check for Metaplex metadata
+      if (isToken2022) {
+        console.log('✅ Token-2022 mint detected - checking built-in metadata');
+      } else if (isStandardToken) {
+        console.log('ℹ️ Standard SPL Token detected - checking for external metadata');
+        // For standard SPL tokens, we can't add metadata (would need Metaplex)
+        // But we can still return basic info if available
+        try {
+          const mintAccount = await getMint(connection, tokenMint, 'confirmed', TOKEN_PROGRAM_ID);
+          return {
+            hasMetadata: false,
+            name: 'Unknown Token',
+            symbol: 'UNK',
+            decimals: mintAccount.decimals
+          };
+        } catch (error) {
+          console.log('⚠️ Could not read standard SPL token mint');
+          return { hasMetadata: false };
+        }
+      } else {
+        console.log('⚠️ Unknown token program - not a valid SPL Token or Token-2022');
         return { hasMetadata: false };
       }
       
-      console.log('✅ Token-2022 mint detected');
+      // Continue with Token-2022 metadata extraction
       
-      // Parse the mint account data to extract metadata
-      // Token-2022 stores metadata directly in the mint account
+      // Token-2022 MetadataPointer extension only stores a pointer (34 bytes), NOT the metadata itself
+      // The actual metadata is stored separately via the Token Metadata Interface
+      // The metadata account can be the mint account itself (inline metadata) or a separate account
       const mintData = mintInfo.data;
       
-      // The metadata is stored after the standard mint data
-      // Standard mint is 82 bytes, metadata starts after that
+      // Check if mint has extensions (base mint is 82 bytes, extensions add more)
       if (mintData.length > 82) {
         try {
           console.log('📊 Mint account size:', mintData.length, 'bytes');

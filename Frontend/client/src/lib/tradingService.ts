@@ -1,5 +1,5 @@
 import { Connection, PublicKey, Transaction, SystemProgram, TransactionInstruction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID, getAccount } from '@solana/spl-token';
 import { PROGRAM_ID } from './nativeProgram';
 import { launchDataService } from './launchDataService';
 
@@ -28,6 +28,182 @@ export class TradingService {
   private requestQueue: Array<() => Promise<any>> = [];
   private isProcessingQueue = false;
   private readonly REQUEST_DELAY = 200; // 200ms delay between requests
+
+  /**
+   * Create amm_base token account using helper instruction
+   * This fixes launches where amm_base wasn't created during launch
+   */
+  async createAmmBase(
+    userPublicKey: PublicKey,
+    ammAccount: PublicKey,
+    tokenMint: PublicKey,
+    signTransaction: (tx: Transaction) => Promise<Transaction>
+  ): Promise<{
+    success: boolean;
+    signature?: string;
+    ammBaseAddress?: string;
+    error?: string;
+  }> {
+    try {
+      console.log('🔧 Creating amm_base token account...');
+      console.log('  User:', userPublicKey.toBase58());
+      console.log('  AMM Account:', ammAccount.toBase58());
+      console.log('  Token Mint:', tokenMint.toBase58());
+      
+      const { Keypair, Transaction, SystemProgram } = await import('@solana/web3.js');
+      const { TOKEN_2022_PROGRAM_ID } = await import('@solana/spl-token');
+      const { LetsCookProgram } = await import('./nativeProgram');
+      
+      // Generate amm_base keypair (same as during launch)
+      const ammBaseKeypair = Keypair.generate();
+      const ammBaseAddress = ammBaseKeypair.publicKey.toBase58();
+      console.log('✅ Generated amm_base keypair:', ammBaseAddress);
+      
+      // Build instruction
+      const instruction = LetsCookProgram.createAmmBaseInstruction({
+        user: userPublicKey,
+        ammBase: ammBaseKeypair.publicKey,
+        amm: ammAccount,
+        baseTokenMint: tokenMint,
+        baseTokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      });
+      
+      // Create transaction
+      const transaction = new Transaction();
+      transaction.add(instruction);
+      
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = userPublicKey;
+      
+      // Sign with keypair first, then wallet
+      transaction.sign(ammBaseKeypair);
+      const signedTx = await signTransaction(transaction);
+      
+      console.log('📤 Sending CreateAmmBase transaction...');
+      const signature = await this.connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: false,
+        maxRetries: 3,
+      });
+      
+      console.log('⏳ Confirming transaction...');
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      
+      console.log('✅ amm_base created successfully!');
+      console.log('  Address:', ammBaseAddress);
+      console.log('  Signature:', signature);
+      
+      // Store the address in launch metadata for future use
+      try {
+        const { LaunchMetadataService } = await import('./launchMetadataService');
+        await LaunchMetadataService.storeMetadata({
+          launch_id: '', // Will be updated if we have launch_id
+          token_mint: tokenMint.toBase58(),
+          amm_base_token_account: ammBaseAddress,
+        });
+        console.log('✅ amm_base address stored in metadata');
+      } catch (metadataError) {
+        console.warn('⚠️ Could not store amm_base in metadata (non-critical):', metadataError);
+      }
+      
+      return {
+        success: true,
+        signature,
+        ammBaseAddress,
+      };
+    } catch (error) {
+      console.error('❌ Error creating amm_base:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Check if amm_base token account exists on-chain
+   * This is a diagnostic helper function
+   */
+  async checkAmmBaseOnChain(
+    ammAccount: PublicKey,
+    tokenMint: PublicKey
+  ): Promise<{
+    exists: boolean;
+    address?: string;
+    accountInfo?: any;
+    error?: string;
+  }> {
+    try {
+      console.log('🔍 Checking amm_base on-chain...');
+      console.log('  AMM Account:', ammAccount.toBase58());
+      console.log('  Token Mint:', tokenMint.toBase58());
+      
+      // Method 1: Query token accounts owned by AMM
+      const response = await this.connection.getParsedTokenAccountsByOwner(
+        ammAccount,
+        { mint: tokenMint },
+        'confirmed'
+      );
+      
+      if (response.value && response.value.length > 0) {
+        const accountInfo = response.value[0];
+        const address = accountInfo.pubkey.toBase58();
+        
+        // Get full account info
+        const fullInfo = await this.connection.getAccountInfo(accountInfo.pubkey);
+        
+        return {
+          exists: true,
+          address,
+          accountInfo: {
+            address,
+            owner: fullInfo?.owner.toBase58(),
+            lamports: fullInfo?.lamports,
+            dataLength: fullInfo?.data.length,
+            executable: fullInfo?.executable,
+            rentEpoch: fullInfo?.rentEpoch,
+            parsed: accountInfo.account?.data
+          }
+        };
+      }
+      
+      // Method 2: Try querying all token accounts for AMM
+      const allAccountsResponse = await this.connection.getParsedTokenAccountsByOwner(
+        ammAccount,
+        { programId: TOKEN_2022_PROGRAM_ID },
+        'confirmed'
+      );
+      
+      if (allAccountsResponse.value && allAccountsResponse.value.length > 0) {
+        for (const acc of allAccountsResponse.value) {
+          if (acc.account && acc.account.data && typeof acc.account.data === 'object' && 'parsed' in acc.account.data) {
+            const parsed = acc.account.data.parsed as any;
+            if (parsed.info && parsed.info.mint === tokenMint.toBase58()) {
+              return {
+                exists: true,
+                address: acc.pubkey.toBase58(),
+                accountInfo: {
+                  address: acc.pubkey.toBase58(),
+                  parsed: parsed
+                }
+              };
+            }
+          }
+        }
+      }
+      
+      return {
+        exists: false,
+        error: 'No token account found for AMM account with this token mint'
+      };
+    } catch (error) {
+      return {
+        exists: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
 
   constructor(connection: Connection) {
     this.connection = connection;
@@ -173,7 +349,7 @@ export class TradingService {
   }
 
   /**
-   * Get swap quote for trading
+   * Get swap quote for trading using actual AMM pool reserves (constant product formula)
    */
   async getSwapQuote(
     inputMint: PublicKey,
@@ -189,42 +365,217 @@ export class TradingService {
         dexProvider
       });
 
-      // For now, implement a simple quote calculation
-      // In a real implementation, this would call the actual DEX APIs
-      
-      const isSOLToToken = inputMint.toBase58() === "So11111111111111111111111111111111111111112";
-      
-      if (isSOLToToken) {
-        // SOL to Token: Simple 1 SOL = 1000 tokens calculation
-        const tokenAmount = amount * 1000;
-        const price = 1 / 1000; // 1 token = 0.001 SOL
-        
-        return {
-          price,
-          outputAmount: tokenAmount,
-          priceImpact: 0.1, // 0.1% price impact
-          minimumReceived: tokenAmount * 0.995 // 0.5% slippage tolerance
-        };
-      } else {
-        // Token to SOL: Simple 1000 tokens = 1 SOL calculation
-        const solAmount = amount / 1000;
-        const price = 1000; // 1000 tokens = 1 SOL
-        
-        return {
-          price,
-          outputAmount: solAmount,
-          priceImpact: 0.1, // 0.1% price impact
-          minimumReceived: solAmount * 0.995 // 0.5% slippage tolerance
-        };
+      const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+      const isSOLToToken = inputMint.equals(WSOL_MINT);
+      const tokenMint = isSOLToToken ? outputMint : inputMint;
+
+      // Get actual token decimals from mint account
+      const { getMint, TOKEN_2022_PROGRAM_ID } = await import('@solana/spl-token');
+      let tokenDecimals = 9; // Default fallback
+      try {
+        const mintInfo = await getMint(this.connection, tokenMint, 'confirmed', TOKEN_2022_PROGRAM_ID).catch(() => 
+          getMint(this.connection, tokenMint, 'confirmed')
+        );
+        tokenDecimals = mintInfo.decimals;
+        console.log('✅ Token decimals:', tokenDecimals);
+      } catch (error) {
+        console.warn('⚠️ Could not fetch token decimals, using default 9:', error);
       }
+
+      // Try Raydium first if specified
+      if (dexProvider === 'raydium') {
+        const { raydiumService } = await import('./raydiumService');
+        const poolAddress = await raydiumService.findPool(tokenMint, WSOL_MINT);
+        
+        if (poolAddress) {
+          const amountIn = BigInt(Math.floor(amount * 1e9)); // Convert SOL to lamports
+          const quote = await raydiumService.getSwapQuote(
+            poolAddress,
+            inputMint,
+            outputMint,
+            amountIn,
+            50 // 0.5% slippage
+          );
+          
+          if (quote) {
+            // Convert output amount using correct decimals
+            const outputAmount = isSOLToToken
+              ? Number(quote.outputAmount) / Math.pow(10, tokenDecimals) // Token output
+              : Number(quote.outputAmount) / 1e9; // SOL output
+            
+            const inputAmount = Number(quote.inputAmount) / 1e9; // Always SOL input in lamports
+            const price = isSOLToToken 
+              ? inputAmount / outputAmount // SOL per token
+              : outputAmount / inputAmount; // SOL per token (inverse)
+            
+            return {
+              price,
+              outputAmount,
+              priceImpact: quote.priceImpact,
+              minimumReceived: outputAmount * 0.995 // 0.5% slippage tolerance
+            };
+          }
+        }
+      }
+
+      // Use Cook DEX AMM pool reserves (constant product formula)
+      const { marketDataService } = await import('./marketDataService');
+      const ammData = await marketDataService.getAMMAccountData(tokenMint.toBase58());
+      
+      if (ammData && ammData.solReserves > 0 && ammData.tokenReserves > 0) {
+        console.log('📊 Using Cook DEX AMM pool for quote:', {
+          solReserves: ammData.solReserves,
+          tokenReserves: ammData.tokenReserves,
+          currentPrice: ammData.price
+        });
+
+        // Constant product formula: (x + Δx) * (y - Δy) = x * y
+        // Where x = SOL reserves, y = token reserves
+        const solReserves = ammData.solReserves; // Already in SOL (not lamports)
+        const tokenReserves = ammData.tokenReserves; // Already in token units
+        
+        // Cook DEX fee: 0.25% (25 basis points)
+        const feeBps = 25;
+        const feeMultiplier = (10000 - feeBps) / 10000; // 0.9975
+        
+        if (isSOLToToken) {
+          // Buying tokens with SOL
+          // Δx = amount (SOL being added)
+          // Δy = (y * Δx * fee) / (x + Δx * fee)
+          const solIn = amount;
+          const solInWithFee = solIn * feeMultiplier;
+          const tokensOut = (tokenReserves * solInWithFee) / (solReserves + solInWithFee);
+          
+          const price = solIn / tokensOut; // Effective price per token
+          const priceImpact = (solIn / solReserves) * 100; // Price impact percentage
+          
+          return {
+            price,
+            outputAmount: tokensOut,
+            priceImpact: Math.min(priceImpact, 100), // Cap at 100%
+            minimumReceived: tokensOut * 0.995 // 0.5% slippage tolerance
+          };
+        } else {
+          // Selling tokens for SOL
+          // Δy = amount (tokens being sold)
+          // Δx = (x * Δy * fee) / (y - Δy * fee)
+          const tokensIn = amount;
+          const tokensInWithFee = tokensIn * feeMultiplier;
+          const solOut = (solReserves * tokensInWithFee) / (tokenReserves - tokensInWithFee);
+          
+          const price = solOut / tokensIn; // Effective price per token
+          const priceImpact = (tokensIn / tokenReserves) * 100; // Price impact percentage
+          
+          return {
+            price,
+            outputAmount: solOut,
+            priceImpact: Math.min(priceImpact, 100), // Cap at 100%
+            minimumReceived: solOut * 0.995 // 0.5% slippage tolerance
+          };
+        }
+      }
+
+      // Final fallback: Use current price from AMM data if available
+      if (ammData && ammData.price > 0) {
+        console.warn('⚠️ Using AMM price as fallback (no reserves available)');
+        const currentPrice = ammData.price;
+        
+        if (isSOLToToken) {
+          const tokensOut = amount / currentPrice;
+          return {
+            price: currentPrice,
+            outputAmount: tokensOut,
+            priceImpact: 0.1,
+            minimumReceived: tokensOut * 0.995
+          };
+        } else {
+          const solOut = amount * currentPrice;
+          return {
+            price: currentPrice,
+            outputAmount: solOut,
+            priceImpact: 0.1,
+            minimumReceived: solOut * 0.995
+          };
+        }
+      }
+
+      // Fallback for bonding curve launches: Use bonding curve formula
+      // This handles instant launches that don't have pools yet or have zero reserves
+      try {
+        const { launchDataService } = await import('./launchDataService');
+        const launch = await launchDataService.getLaunchByTokenMint(tokenMint.toBase58());
+        
+        if (launch && launch.launchType === 'instant' && !launch.isGraduated) {
+          const { bondingCurveService } = await import('./bondingCurveService');
+          const bondingCurveConfig = {
+            totalSupply: launch.totalSupply,
+            curveType: 'linear' as const,
+          };
+          
+          const currentTokensSold = launch.tokensSold || 0;
+          
+          // Cook DEX fee: 0.25% (25 basis points) - same as pool trades
+          const feeBps = 25;
+          const feeMultiplier = (10000 - feeBps) / 10000; // 0.9975
+          
+          if (isSOLToToken) {
+            // Buying tokens with SOL using bonding curve
+            // Calculate tokens received for SOL amount (with fee applied)
+            const solAfterFee = amount * feeMultiplier;
+            // calculateTokensForSol returns human-readable units
+            const tokensOut = bondingCurveService.calculateTokensForSol(
+              solAfterFee,
+              currentTokensSold,
+              bondingCurveConfig
+            );
+            
+            const effectivePrice = tokensOut > 0 ? amount / tokensOut : 0;
+            const remainingSupply = launch.totalSupply - currentTokensSold;
+            const priceImpact = remainingSupply > 0 ? (tokensOut / remainingSupply) * 100 : 0;
+            
+            return {
+              price: effectivePrice,
+              outputAmount: tokensOut, // Human-readable format
+              priceImpact: Math.min(priceImpact, 100),
+              minimumReceived: tokensOut * 0.995 // 0.5% slippage tolerance
+            };
+        } else {
+          // Selling tokens for SOL using bonding curve
+          // amount is in human-readable token units
+          // calculateSolForTokens expects tokensAmount in human-readable format
+          const solBeforeFee = bondingCurveService.calculateSolForTokens(
+            amount, // Already in human-readable format
+            currentTokensSold,
+            bondingCurveConfig
+          );
+          
+          // calculateSolForTokens returns SOL (human-readable)
+          const solOut = solBeforeFee * feeMultiplier; // Apply fee
+          const effectivePrice = amount > 0 ? solOut / amount : 0;
+          const priceImpact = currentTokensSold > 0 ? (amount / currentTokensSold) * 100 : 0;
+          
+          return {
+            price: effectivePrice,
+            outputAmount: solOut, // In SOL (human-readable)
+            priceImpact: Math.min(priceImpact, 100),
+            minimumReceived: solOut * 0.995 // 0.5% slippage tolerance
+          };
+        }
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not calculate bonding curve quote:', error);
+      }
+
+      // Last resort: Return error
+      throw new Error('No liquidity pool found and not a bonding curve launch. Pool must exist for trading.');
     } catch (error) {
       console.error('❌ Error getting swap quote:', error);
-      throw new Error('Failed to get swap quote');
+      throw error instanceof Error ? error : new Error('Failed to get swap quote');
     }
   }
 
   /**
-   * Buy tokens using instant swap
+   * Buy tokens using instant swap (Raydium or Cook DEX)
    */
   async buyTokensAMM(
     tokenMint: string,
@@ -247,6 +598,55 @@ export class TradingService {
 
       const userKey = new PublicKey(userPublicKey);
       let tokenMintKey = new PublicKey(tokenMint);
+      
+      // Use Raydium if selected
+      if (dexProvider === 'raydium') {
+        try {
+          const { raydiumService } = await import('./raydiumService');
+          const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+          
+          // Find pool
+          const poolAddress = await raydiumService.findPool(tokenMintKey, WSOL_MINT);
+          
+          if (poolAddress) {
+            console.log('✅ Found Raydium pool, executing swap...');
+            
+            const amountIn = BigInt(Math.floor(solAmount * 1e9));
+            const quote = await raydiumService.getSwapQuote(
+              poolAddress,
+              WSOL_MINT,
+              tokenMintKey,
+              amountIn,
+              50 // 0.5% slippage
+            );
+            
+            if (quote) {
+              const minAmountOut = quote.outputAmount * BigInt(9950) / BigInt(10000); // 0.5% slippage
+              
+              const signature = await raydiumService.swap(
+                poolAddress,
+                userKey,
+                WSOL_MINT,
+                tokenMintKey,
+                amountIn,
+                minAmountOut,
+                signTransaction
+              );
+              
+              return {
+                success: true,
+                signature,
+                tokensReceived: Number(quote.outputAmount) / 1e9,
+                solReceived: solAmount
+              };
+            }
+          }
+          
+          console.log('⚠️ Raydium pool not found, falling back to Cook DEX');
+        } catch (raydiumError) {
+          console.error('❌ Raydium swap failed, falling back to Cook DEX:', raydiumError);
+        }
+      }
       
       // Check if the provided tokenMint is actually a token mint (SPL or Token 2022)
       console.log('🔍 Checking if tokenMint is a real token mint...');
@@ -422,9 +822,41 @@ export class TradingService {
       // Use Cook AMM instruction (variant 20) - this is what our program expects
       console.log('⚡ Using Cook AMM swap instruction');
       
+      // Get launch data to extract state fields
+      let isInstantLaunch = 0;
+      let isGraduated = 0;
+      let tokensSold = 0;
+      let totalSupply = 0;
+      let creatorKey = PublicKey.default;
+      
+      try {
+        const launchData = await launchDataService.getLaunchByTokenMint(tokenMintKey.toBase58());
+        
+        if (launchData) {
+          isInstantLaunch = launchData.launchType === 'instant' ? 1 : 0;
+          isGraduated = launchData.isGraduated === true ? 1 : 0;
+          
+          // Convert to raw units, but clamp to u64 max to prevent overflow
+          // u64 max: 18,446,744,073,709,551,615 (2^64 - 1)
+          const U64_MAX = BigInt('18446744073709551615');
+          const rawTokensSold = BigInt(Math.floor((launchData.tokensSold || 0) * 1e9));
+          tokensSold = Number(rawTokensSold > U64_MAX ? U64_MAX : rawTokensSold);
+          
+          const rawTotalSupply = BigInt(Math.floor((launchData.totalSupply || 0) * 1e9));
+          totalSupply = Number(rawTotalSupply > U64_MAX ? U64_MAX : rawTotalSupply);
+          
+          if (launchData.creator) {
+            creatorKey = new PublicKey(launchData.creator);
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not get launch data for args, using defaults:', error);
+      }
+      
       // Cook AMM uses PlaceOrderArgs with proper Borsh serialization (Backend version)
       // Structure: side(u8) + limit_price(u64) + max_base_quantity(u64) + max_quote_quantity(u64) + order_type(u8) + client_order_id(u64) + limit(u16)
-      const argsBuffer = Buffer.alloc(36); // Exact size: 1 + 8 + 8 + 8 + 1 + 8 + 2 = 36 bytes
+      // + is_instant_launch(u8) + is_graduated(u8) + tokens_sold(u64) + total_supply(u64) + creator_key(Pubkey/32 bytes)
+      const argsBuffer = Buffer.alloc(86); // Exact size: 1 + 8 + 8 + 8 + 1 + 8 + 2 + 1 + 1 + 8 + 8 + 32 = 86 bytes
       let offset = 0;
       
       // Write side (u8): 0 = buy, 1 = sell
@@ -455,6 +887,26 @@ export class TradingService {
       argsBuffer.writeUInt16LE(0, offset);
       offset += 2;
       
+      // Write is_instant_launch (u8): 0 = false, 1 = true
+      argsBuffer.writeUInt8(isInstantLaunch, offset);
+      offset += 1;
+      
+      // Write is_graduated (u8): 0 = false, 1 = true
+      argsBuffer.writeUInt8(isGraduated, offset);
+      offset += 1;
+      
+      // Write tokens_sold (u64): current tokens sold for bonding curve
+      argsBuffer.writeBigUInt64LE(BigInt(tokensSold), offset);
+      offset += 8;
+      
+      // Write total_supply (u64): total supply for creator limit check
+      argsBuffer.writeBigUInt64LE(BigInt(totalSupply), offset);
+      offset += 8;
+      
+      // Write creator_key (Pubkey, 32 bytes)
+      argsBuffer.set(creatorKey.toBytes(), offset);
+      offset += 32;
+      
       instructionData = Buffer.concat([
         Buffer.from([10]), // Cook AMM variant index (SwapCookAMM) - 10th variant (0-indexed)
         argsBuffer
@@ -468,8 +920,58 @@ export class TradingService {
       });
       
       // Derive Cook AMM accounts
-      const [ammAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenMintKey.toBuffer()],
+      // Derive the AMM account using the same seeds as backend
+      // Backend uses: [base_mint, quote_mint, b"CookAMM"] (sorted)
+      const WSOL_MINT_BUY = new PublicKey('So11111111111111111111111111111111111111112');
+      const baseFirstBuy = tokenMintKey.toString() < WSOL_MINT_BUY.toString();
+      const ammSeedsBuy = baseFirstBuy
+        ? [tokenMintKey.toBuffer(), WSOL_MINT_BUY.toBuffer(), Buffer.from('CookAMM')]
+        : [WSOL_MINT_BUY.toBuffer(), tokenMintKey.toBuffer(), Buffer.from('CookAMM')];
+      const [ammAccount] = PublicKey.findProgramAddressSync(ammSeedsBuy, PROGRAM_ID);
+      
+      // Check if graduation threshold will be met after this trade
+      // If so, we'll include CreateRaydium instruction in the same transaction
+      const GRADUATION_THRESHOLD_SOL = 30; // 30 SOL threshold
+      const GRADUATION_THRESHOLD_LAMPORTS = GRADUATION_THRESHOLD_SOL * 1_000_000_000;
+      let shouldCreateRaydiumPool = false;
+      
+      if (isInstantLaunch === 1 && isGraduated === 0) {
+        try {
+          const ammAccountInfo = await this.connection.getAccountInfo(ammAccount);
+          const currentAmmBalance = ammAccountInfo?.lamports || 0;
+          const balanceAfterTrade = currentAmmBalance + amountInLamports;
+          
+          console.log('🔍 Graduation check:', {
+            currentBalance: currentAmmBalance / 1e9,
+            tradeAmount: amountInLamports / 1e9,
+            balanceAfterTrade: balanceAfterTrade / 1e9,
+            threshold: GRADUATION_THRESHOLD_SOL,
+            willMeetThreshold: balanceAfterTrade >= GRADUATION_THRESHOLD_LAMPORTS
+          });
+          
+          // If this trade will push us over 30 SOL threshold, create Raydium pool
+          if (balanceAfterTrade >= GRADUATION_THRESHOLD_LAMPORTS && currentAmmBalance < GRADUATION_THRESHOLD_LAMPORTS) {
+            shouldCreateRaydiumPool = true;
+            console.log('🚀 Graduation threshold will be met! Will create Raydium pool in same transaction');
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not check AMM balance for graduation:', error);
+        }
+      }
+      
+      // Derive cook_pda (needed as mint authority in invoke_signed)
+      // Backend uses SOL_SEED (59957379) as u32.to_le_bytes()
+      const SOL_SEED = 59957379;
+      const [cookPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from(SOL_SEED.toString(16).padStart(8, '0'), 'hex')], // Convert to bytes like to_le_bytes()
+        PROGRAM_ID
+      );
+      
+      // Actually, let's use the same method as the backend - u32.to_le_bytes()
+      const solSeedBuffer = Buffer.alloc(4);
+      solSeedBuffer.writeUInt32LE(SOL_SEED, 0);
+      const [cookPdaCorrect] = PublicKey.findProgramAddressSync(
+        [solSeedBuffer],
         PROGRAM_ID
       );
       
@@ -496,22 +998,589 @@ export class TradingService {
       const tokenProgram = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
       console.log('🔍 Using token program:', tokenProgram.toBase58(), isToken2022 ? '(Token 2022)' : '(SPL Token)');
 
+      // Find amm_base token account (the AMM pool's token account that holds all minted tokens)
+      // PRIORITY 1: Try to get from Supabase first (fastest and most reliable)
+      // PRIORITY 2: Query blockchain if Supabase doesn't have it
+      let ammBaseTokenAccount: PublicKey | null = null;
+      try {
+        // PRIORITY 1: Try Supabase first (stored during launch creation)
+        console.log('🔍 Searching for amm_base token account...');
+        console.log('  AMM Account:', ammAccount.toBase58());
+        console.log('  Token Mint:', tokenMintKey.toBase58());
+        console.log('  📦 Checking Supabase first...');
+        
+        try {
+          // Try launch metadata service first (Supabase)
+          const { LaunchMetadataService } = await import('./launchMetadataService');
+          const metadata = await LaunchMetadataService.getMetadataByTokenMint(tokenMintKey.toBase58());
+          if (metadata && metadata.amm_base_token_account) {
+            ammBaseTokenAccount = new PublicKey(metadata.amm_base_token_account);
+            console.log('✅ Found amm_base from Supabase (launch metadata):', ammBaseTokenAccount.toBase58());
+            
+            // Verify it exists on-chain
+            const verifyInfo = await this.connection.getAccountInfo(ammBaseTokenAccount).catch(() => null);
+            if (verifyInfo) {
+              console.log('✅ Verified amm_base from Supabase exists on-chain. Owner:', verifyInfo.owner.toBase58(), 'Data length:', verifyInfo.data.length);
+            } else {
+              console.warn('⚠️ amm_base from Supabase does not exist on-chain, will try blockchain query');
+              ammBaseTokenAccount = null; // Mark as invalid, try blockchain query
+            }
+          } else {
+            // Try launch data service as fallback
+            const launchData = await launchDataService.getLaunchByTokenMint(tokenMintKey.toBase58());
+            if (launchData && (launchData as any).ammBaseTokenAccount) {
+              ammBaseTokenAccount = new PublicKey((launchData as any).ammBaseTokenAccount);
+              console.log('✅ Found amm_base from launch data service:', ammBaseTokenAccount.toBase58());
+              
+              // Verify it exists on-chain
+              const verifyInfo = await this.connection.getAccountInfo(ammBaseTokenAccount).catch(() => null);
+              if (!verifyInfo) {
+                console.warn('⚠️ amm_base from launch data service does not exist on-chain, will try blockchain query');
+                ammBaseTokenAccount = null;
+              }
+            }
+          }
+        } catch (supabaseError) {
+          console.warn('⚠️ Could not get amm_base from Supabase, will try blockchain query:', supabaseError);
+        }
+        
+        // PRIORITY 2: Query blockchain if Supabase doesn't have it
+        if (!ammBaseTokenAccount) {
+          console.log('  🔗 Querying blockchain for amm_base...');
+          
+          // Query token accounts owned by the AMM account (PDA) for this token mint
+          // Use connection.getParsedTokenAccountsByOwner which is available in @solana/web3.js
+          const response = await this.connection.getParsedTokenAccountsByOwner(
+            ammAccount,
+            { mint: tokenMintKey },
+            'confirmed'
+          );
+          
+          console.log('  Found token accounts:', response.value?.length || 0);
+          
+          if (response.value && response.value.length > 0) {
+            // Found the token account - this is amm_base
+            const accountInfo = response.value[0];
+            if (accountInfo && accountInfo.pubkey) {
+              ammBaseTokenAccount = accountInfo.pubkey;
+              console.log('✅ Found amm_base token account from blockchain:', ammBaseTokenAccount.toBase58());
+              
+              // Verify it immediately and check authority from parsed data
+              const verifyInfo = await this.connection.getAccountInfo(ammBaseTokenAccount);
+              if (verifyInfo) {
+                console.log('✅ Verified amm_base exists. Owner:', verifyInfo.owner.toBase58(), 'Data length:', verifyInfo.data.length);
+                
+                // Check authority from parsed account data if available
+                if (accountInfo.account && accountInfo.account.data && typeof accountInfo.account.data === 'object' && 'parsed' in accountInfo.account.data) {
+                  const parsed = accountInfo.account.data.parsed as any;
+                  if (parsed.info && parsed.info.owner) {
+                    const parsedAuthority = new PublicKey(parsed.info.owner);
+                    if (!parsedAuthority.equals(ammAccount)) {
+                      console.error('❌ amm_base authority mismatch from parsed data!', {
+                        ammBaseAccount: ammBaseTokenAccount.toBase58(),
+                        expectedAuthority: ammAccount.toBase58(),
+                        actualAuthority: parsedAuthority.toBase58()
+                      });
+                      // Don't throw here - let the later verification catch it with better error message
+                      ammBaseTokenAccount = null; // Mark as invalid so we try other methods
+                    } else {
+                      console.log('✅ Verified amm_base authority from parsed data:', parsedAuthority.toBase58());
+                    }
+                  }
+                }
+              } else {
+                console.warn('⚠️ amm_base account not found on-chain, will try fallback');
+                ammBaseTokenAccount = null;
+              }
+            }
+          }
+          
+          // If not found, try alternative methods
+          if (!ammBaseTokenAccount) {
+            console.warn('⚠️ No token account found via query, trying alternative methods...');
+            
+            // Try querying all token accounts for the AMM (without mint filter)
+            try {
+              // Query without filter to get all token accounts
+              const allAccountsResponse = await this.connection.getParsedTokenAccountsByOwner(
+                ammAccount,
+                { programId: tokenProgram },
+                'confirmed'
+              );
+              
+              if (allAccountsResponse.value && allAccountsResponse.value.length > 0) {
+                // Find the one that matches our token mint
+                for (const acc of allAccountsResponse.value) {
+                  if (acc.account && acc.account.data && typeof acc.account.data === 'object' && 'parsed' in acc.account.data) {
+                    const parsed = acc.account.data.parsed as any;
+                    if (parsed.info && parsed.info.mint === tokenMintKey.toBase58()) {
+                      ammBaseTokenAccount = acc.pubkey;
+                      console.log('✅ Found amm_base via alternative query:', ammBaseTokenAccount.toBase58());
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch (altError) {
+              console.warn('⚠️ Alternative query also failed:', altError);
+            }
+          }
+          
+          // Try deriving as PDA (new launches use PDA for amm_base)
+          if (!ammBaseTokenAccount) {
+            try {
+              const { PROGRAM_ID } = await import('./nativeProgram');
+              // Derive amm_base PDA: [amm.key, b"amm_base"]
+              const [ammBasePDA] = PublicKey.findProgramAddressSync(
+                [ammAccount.toBuffer(), Buffer.from('amm_base')],
+                PROGRAM_ID
+              );
+              
+              console.log('🔍 Derived amm_base PDA:', ammBasePDA.toBase58());
+              console.log('  AMM Account used for derivation:', ammAccount.toBase58());
+              
+              // Verify the PDA account exists and has the correct mint
+              const pdaAccountInfo = await this.connection.getParsedAccountInfo(ammBasePDA).catch(() => null);
+              if (pdaAccountInfo?.value && typeof pdaAccountInfo.value.data === 'object' && 'parsed' in pdaAccountInfo.value.data) {
+                const parsed = pdaAccountInfo.value.data.parsed as any;
+                if (parsed.info && parsed.info.mint === tokenMintKey.toBase58()) {
+                  ammBaseTokenAccount = ammBasePDA;
+                  console.log('✅ Found amm_base as PDA (new launch format):', ammBaseTokenAccount.toBase58());
+                } else {
+                  console.warn('⚠️ Derived PDA exists but has wrong mint:', parsed.info?.mint, 'expected:', tokenMintKey.toBase58());
+                }
+              } else {
+                console.warn('⚠️ Derived amm_base PDA does not exist or is not initialized:', ammBasePDA.toBase58());
+              }
+            } catch (pdaError) {
+              console.warn('⚠️ Could not derive amm_base PDA:', pdaError);
+            }
+          }
+        }
+        
+        // If still not found, try querying by program account ownership
+        // The amm_base is a token account owned by the token program, with AMM as authority
+        if (!ammBaseTokenAccount) {
+          console.warn('⚠️ Trying alternative method: querying all token accounts...');
+          try {
+            // Get all token accounts for this mint
+            const allTokenAccounts = await this.connection.getParsedProgramAccounts(
+              tokenProgram,
+              {
+                filters: [
+                  {
+                    dataSize: 165, // Token account size
+                  },
+                  {
+                    memcmp: {
+                      offset: 0, // Mint is at offset 0 in token account
+                      bytes: tokenMintKey.toBase58(),
+                    },
+                  },
+                ],
+              }
+            );
+            
+            console.log(`  Found ${allTokenAccounts.length} token accounts for this mint`);
+            
+            // Find the one owned by AMM account
+            for (const account of allTokenAccounts) {
+              const accountInfo = account.account;
+              if (accountInfo && accountInfo.data && typeof accountInfo.data === 'object' && 'parsed' in accountInfo.data) {
+                const parsed = accountInfo.data.parsed as any;
+                // Check if this account's owner/authority is the AMM account
+                if (parsed.info && parsed.info.owner === ammAccount.toBase58()) {
+                  ammBaseTokenAccount = account.pubkey;
+                  console.log('✅ Found amm_base via program account query:', ammBaseTokenAccount.toBase58());
+                  break;
+                }
+              }
+            }
+          } catch (programQueryError) {
+            console.warn('⚠️ Program account query failed:', programQueryError);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error finding amm_base token account:', error);
+        // Will throw error later if not found
+      }
+      
       // Create instruction keys according to Backend SwapCookAMM account structure
+      // Backend expects:
+      // 0-5: user, token_mint, amm_account, user_token_account, user_sol_account, ledger_wallet
+      // 6: launch_data (optional, only if accounts.len() > 6)
+      // 7: token_program (checked if accounts.len() > 7)
+      // 8: cook_pda (checked if accounts.len() > 8)
+      // 9: amm_base (checked if accounts.len() > 9) - REQUIRED for bonding curve transfers
+      // Note: system_program is NOT in the accounts array - it's passed separately to invoke calls
+      
       const instructionKeys = [
         { pubkey: userKey, isSigner: true, isWritable: true },        // user (0)
-        { pubkey: tokenMintKey, isSigner: false, isWritable: true }, // token_mint (1) - MUST be writable for minting
+        { pubkey: tokenMintKey, isSigner: false, isWritable: true }, // token_mint (1)
         { pubkey: ammAccount, isSigner: false, isWritable: true },    // amm_account (2)
         { pubkey: userTokenAccount, isSigner: false, isWritable: true }, // user_token_account (3)
         { pubkey: userSolAccount, isSigner: false, isWritable: true }, // user_sol_account (4)
-        { pubkey: feesAccount, isSigner: false, isWritable: true },   // ledger_wallet (5) - needs to be writable to receive fees
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program (6)
-        { pubkey: tokenProgram, isSigner: false, isWritable: false }, // token_program (7) - REQUIRED for mint_to CPI
+        { pubkey: feesAccount, isSigner: false, isWritable: true },   // ledger_wallet (5)
       ];
       
-      // Only add launch data account if it exists (optional 9th account)
+      // Add launch data account at index 6 (if it exists)
       if (launchAccountInfo) {
-        instructionKeys.push({ pubkey: launchDataAccount, isSigner: false, isWritable: false }); // launch_data (8) - optional
+        instructionKeys.push({ pubkey: launchDataAccount, isSigner: false, isWritable: true }); // launch_data (6)
       }
+      
+      // Add token_program at index 7
+      instructionKeys.push({ pubkey: tokenProgram, isSigner: false, isWritable: false }); // token_program (7)
+      
+      // Add cook_pda at index 8
+      instructionKeys.push({ pubkey: cookPdaCorrect, isSigner: false, isWritable: false }); // cook_pda (8)
+      
+      // Add amm_base at index 9 - REQUIRED for bonding curve transfers
+      // Verify the account exists and is initialized before using it
+      if (ammBaseTokenAccount) {
+        try {
+          // Verify the account exists and is initialized
+          const ammBaseAccountInfo = await this.connection.getAccountInfo(ammBaseTokenAccount);
+          if (!ammBaseAccountInfo) {
+            console.error('❌ amm_base account does not exist:', ammBaseTokenAccount.toBase58());
+            throw new Error(`amm_base token account does not exist: ${ammBaseTokenAccount.toBase58()}. The account must be created during launch.`);
+          }
+          
+          // Check if it's a token account (owned by token program)
+          const isTokenAccount = ammBaseAccountInfo.owner.equals(TOKEN_2022_PROGRAM_ID) || 
+                                 ammBaseAccountInfo.owner.equals(TOKEN_PROGRAM_ID);
+          
+          if (!isTokenAccount) {
+            console.error('❌ amm_base is not a token account. Owner:', ammBaseAccountInfo.owner.toBase58());
+            throw new Error(`amm_base account is not a token account. Owner: ${ammBaseAccountInfo.owner.toBase58()}`);
+          }
+          
+          // Check if account is initialized (has data)
+          if (ammBaseAccountInfo.data.length === 0) {
+            console.error('❌ amm_base account is not initialized (empty data)');
+            throw new Error('amm_base token account is not initialized. It must be initialized during launch.');
+          }
+          
+          // CRITICAL: Verify that the token account's authority is the AMM account
+          // In Token-2022, the account structure is:
+          // - Offset 0-31: mint (32 bytes)
+          // - Offset 32-63: owner/authority (32 bytes)
+          if (ammBaseAccountInfo.data.length >= 64) {
+            const authorityBytes = ammBaseAccountInfo.data.slice(32, 64);
+            const authorityPubkey = new PublicKey(authorityBytes);
+            
+            if (!authorityPubkey.equals(ammAccount)) {
+              console.error('❌ amm_base authority mismatch!', {
+                ammBaseAccount: ammBaseTokenAccount.toBase58(),
+                expectedAuthority: ammAccount.toBase58(),
+                actualAuthority: authorityPubkey.toBase58()
+              });
+              
+              // Try to find the correct amm_base account by searching all token accounts
+              console.log('🔍 Searching for correct amm_base account with proper authority...');
+              let foundCorrectAccount = false;
+              
+              try {
+                // Search all token accounts for this mint
+                const allTokenAccounts = await this.connection.getParsedProgramAccounts(
+                  tokenProgram,
+                  {
+                    filters: [
+                      {
+                        dataSize: 165, // Token account size
+                      },
+                      {
+                        memcmp: {
+                          offset: 0, // Mint is at offset 0 in token account
+                          bytes: tokenMintKey.toBase58(),
+                        },
+                      },
+                    ],
+                  }
+                );
+                
+                console.log(`  Found ${allTokenAccounts.length} token accounts for this mint`);
+                
+                // Check each account to find one with correct authority
+                for (const account of allTokenAccounts) {
+                  try {
+                    const accountInfo = await this.connection.getAccountInfo(account.pubkey);
+                    if (accountInfo && accountInfo.data.length >= 64) {
+                      const accountAuthorityBytes = accountInfo.data.slice(32, 64);
+                      const accountAuthority = new PublicKey(accountAuthorityBytes);
+                      
+                      if (accountAuthority.equals(ammAccount)) {
+                        console.log('✅ Found correct amm_base account with proper authority:', account.pubkey.toBase58());
+                        
+                        // Verify this account is for the correct mint
+                        const accountMintBytes = accountInfo.data.slice(0, 32);
+                        const accountMint = new PublicKey(accountMintBytes);
+                        if (accountMint.equals(tokenMintKey)) {
+                          ammBaseTokenAccount = account.pubkey;
+                          foundCorrectAccount = true;
+                          console.log('✅ Verified correct amm_base account has correct mint and authority');
+                          break;
+                        } else {
+                          console.warn('⚠️ Account has correct authority but wrong mint, skipping...');
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    // Skip this account if we can't read it
+                    continue;
+                  }
+                }
+              } catch (searchError) {
+                console.warn('⚠️ Could not search for correct amm_base:', searchError);
+              }
+              
+              // If we didn't find a correct account, we need to create one
+              if (!foundCorrectAccount) {
+                console.log('⚠️ No correct amm_base found. The account needs to be created with proper authority.');
+                console.log('💡 Attempting to create amm_base account automatically...');
+                
+                // Automatically create amm_base if signTransaction is available
+                if (signTransaction) {
+                  try {
+                    console.log('🔧 Creating new amm_base account with correct authority...');
+                    const createResult = await this.createAmmBase(
+                      userKey,
+                      ammAccount,
+                      tokenMintKey,
+                      signTransaction
+                    );
+                    
+                    if (createResult.success && createResult.ammBaseAddress) {
+                      console.log('✅ Successfully created amm_base account:', createResult.ammBaseAddress);
+                      ammBaseTokenAccount = new PublicKey(createResult.ammBaseAddress);
+                      foundCorrectAccount = true;
+                      
+                      // Verify the newly created account
+                      const newAccountInfo = await this.connection.getAccountInfo(ammBaseTokenAccount);
+                      if (newAccountInfo && newAccountInfo.data.length >= 64) {
+                        const newAuthorityBytes = newAccountInfo.data.slice(32, 64);
+                        const newAuthority = new PublicKey(newAuthorityBytes);
+                        if (newAuthority.equals(ammAccount)) {
+                          console.log('✅ Verified newly created amm_base has correct authority');
+                          
+                          // Check if the account has tokens (it might be empty if tokens are in the old account)
+                          try {
+                            const parsedAccount = await this.connection.getParsedAccountInfo(ammBaseTokenAccount);
+                            if (parsedAccount.value && typeof parsedAccount.value.data === 'object' && 'parsed' in parsedAccount.value.data) {
+                              const parsed = parsedAccount.value.data.parsed as any;
+                              if (parsed.info && parsed.info.tokenAmount) {
+                                const balance = parsed.info.tokenAmount.uiAmount || 0;
+                                if (balance === 0) {
+                                  console.warn('⚠️ Newly created amm_base account is empty.');
+                                  
+                                  // Check if the old account has tokens
+                                  try {
+                                    const oldAccount = new PublicKey('G211TBJ2ELfPn4GTyhSx8e7JsRVfRhohV7o1cvFEEQb4');
+                                    const oldParsedAccount = await this.connection.getParsedAccountInfo(oldAccount);
+                                    if (oldParsedAccount.value && typeof oldParsedAccount.value.data === 'object' && 'parsed' in oldParsedAccount.value.data) {
+                                      const oldParsed = oldParsedAccount.value.data.parsed as any;
+                                      if (oldParsed.info && oldParsed.info.tokenAmount) {
+                                        const oldBalance = oldParsed.info.tokenAmount.uiAmount || 0;
+                                        if (oldBalance > 0) {
+                                          console.error(`❌ CRITICAL: Old amm_base account has ${oldBalance} tokens but wrong authority. Tokens are stuck!`);
+                                          console.error(`❌ Old account: G211TBJ2ELfPn4GTyhSx8e7JsRVfRhohV7o1cvFEEQb4`);
+                                          console.error(`❌ New account: ${ammBaseTokenAccount.toBase58()}`);
+                                          console.error(`❌ The swap will fail because tokens cannot be transferred from the old account.`);
+                                          console.error(`❌ Solution: The launch needs to be fixed to transfer tokens to the new account, or tokens need to be manually transferred by the account with authority F9xhoKDyFu6yktYuvyT3PmqmEL6eZeZM1PxZWRGUgVNb`);
+                                        }
+                                      }
+                                    }
+                                  } catch (oldAccountError) {
+                                    console.warn('⚠️ Could not check old amm_base balance:', oldAccountError);
+                                  }
+                                  
+                                  console.warn('⚠️ The swap may fail with "insufficient funds" error because amm_base is empty.');
+                                } else {
+                                  console.log(`✅ New amm_base account has ${balance} tokens`);
+                                }
+                              }
+                            }
+                          } catch (balanceError) {
+                            console.warn('⚠️ Could not check amm_base balance:', balanceError);
+                          }
+                        } else {
+                          console.error('❌ Newly created amm_base still has wrong authority!');
+                          throw new Error('Failed to create amm_base with correct authority');
+                        }
+                      }
+                    } else {
+                      throw new Error(createResult.error || 'Failed to create amm_base account');
+                    }
+                  } catch (createError) {
+                    console.error('❌ Failed to automatically create amm_base:', createError);
+                    throw new Error(
+                      `amm_base token account has incorrect authority. Expected: ${ammAccount.toBase58()}, Found: ${authorityPubkey.toBase58()}. ` +
+                      `The amm_base account (${ammBaseTokenAccount.toBase58()}) was created with the wrong authority during launch. ` +
+                      `Automatic creation failed: ${createError instanceof Error ? createError.message : 'Unknown error'}. ` +
+                      `Please use the "Fix amm_base" button or call createAmmBase() manually.`
+                    );
+                  }
+                } else {
+                  // signTransaction not available, throw helpful error
+                  throw new Error(
+                    `amm_base token account has incorrect authority. Expected: ${ammAccount.toBase58()}, Found: ${authorityPubkey.toBase58()}. ` +
+                    `The amm_base account (${ammBaseTokenAccount.toBase58()}) was created with the wrong authority during launch. ` +
+                    `Please use the "Fix amm_base" button or call createAmmBase() to create a new account with the correct authority.`
+                  );
+                }
+              }
+            } else {
+              console.log('✅ Verified amm_base authority matches AMM account:', authorityPubkey.toBase58());
+            }
+          } else {
+            console.warn('⚠️ Could not verify amm_base authority (data too short)');
+          }
+          
+          console.log('✅ Verified amm_base token account exists, is initialized, and has correct authority');
+          instructionKeys.push({ pubkey: ammBaseTokenAccount, isSigner: false, isWritable: true }); // amm_base (9)
+        } catch (error) {
+          console.error('❌ Error verifying amm_base account:', error);
+          throw new Error(`amm_base token account verification failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please ensure the launch was completed successfully and the amm_base account was created.`);
+        }
+      } else {
+        // If we couldn't find amm_base, check on-chain and provide detailed error message
+        console.log('🔍 amm_base not found, running comprehensive diagnostic check...');
+        const onChainCheck = await this.checkAmmBaseOnChain(ammAccount, tokenMintKey);
+        
+        if (onChainCheck.exists && onChainCheck.address) {
+          // Found it on-chain but our query missed it - use the found address
+          console.log('✅ Found amm_base on-chain via diagnostic check:', onChainCheck.address);
+          console.log('  Account info:', onChainCheck.accountInfo);
+          ammBaseTokenAccount = new PublicKey(onChainCheck.address);
+          
+          // Verify it's valid before using
+          try {
+            const verifyInfo = await this.connection.getAccountInfo(ammBaseTokenAccount);
+            if (!verifyInfo || verifyInfo.data.length === 0) {
+              throw new Error('amm_base account found but not initialized');
+            }
+            
+            // Verify authority matches AMM account
+            if (verifyInfo.data.length >= 64) {
+              const authorityBytes = verifyInfo.data.slice(32, 64);
+              const authorityPubkey = new PublicKey(authorityBytes);
+              
+              if (!authorityPubkey.equals(ammAccount)) {
+                console.error('❌ amm_base from diagnostic check has wrong authority!', {
+                  ammBaseAccount: ammBaseTokenAccount.toBase58(),
+                  expectedAuthority: ammAccount.toBase58(),
+                  actualAuthority: authorityPubkey.toBase58()
+                });
+                throw new Error(`amm_base account has incorrect authority. Expected: ${ammAccount.toBase58()}, Found: ${authorityPubkey.toBase58()}`);
+              }
+              
+              console.log('✅ Verified amm_base authority from diagnostic check:', authorityPubkey.toBase58());
+            }
+            
+            instructionKeys.push({ pubkey: ammBaseTokenAccount, isSigner: false, isWritable: true }); // amm_base (9)
+            console.log('✅ Verified and using amm_base from diagnostic check');
+          } catch (verifyError) {
+            console.error('❌ amm_base verification failed:', verifyError);
+            throw new Error(`amm_base account found but invalid: ${verifyError instanceof Error ? verifyError.message : 'Unknown error'}`);
+          }
+        } else {
+          // Really doesn't exist - provide detailed error with actionable steps
+          const diagnosticInfo = onChainCheck.error || 'Account not found on-chain';
+          
+          // Check if AMM account itself exists
+          const ammAccountInfo = await this.connection.getAccountInfo(ammAccount);
+          const ammExists = ammAccountInfo && ammAccountInfo.lamports > 0;
+          
+          const errorMessage = `❌ Could not find amm_base token account for token ${tokenMintKey.toBase58()}.
+
+🔍 Diagnostic Results:
+- AMM Account exists: ${ammExists ? '✅ Yes' : '❌ No'}
+- amm_base found: ❌ No
+- Error: ${diagnosticInfo}
+
+📋 What this means:
+The amm_base token account is required for bonding curve trades. This account should have been created during the launch transaction.
+
+🔧 Possible Solutions:
+
+1. ✅ CHECK FIRST: Verify the launch transaction completed successfully
+   - Check transaction signature on Solana Explorer
+   - Look for "amm_base initialized" in transaction logs
+
+2. ✅ CHECK ON-CHAIN: View the AMM account on Solana Explorer
+   - AMM Account: https://solscan.io/account/${ammAccount.toBase58()}?cluster=devnet
+   - Look for token accounts owned by this AMM account
+   - If you see a token account for this mint, note its address
+
+3. ✅ IF ACCOUNT EXISTS: The account may exist but we can't find it
+   - Try refreshing the page
+   - Check browser console for detailed logs
+   - The diagnostic check should have found it if it exists
+
+4. ⚠️ IF ACCOUNT DOESN'T EXIST: The launch may not have completed successfully
+   - Check the launch transaction for errors
+   - The amm_base account creation may have failed
+   - You may need to create a new launch
+
+💡 Quick Fix:
+
+Look for the "Fix Now" button in the error toast above - it will automatically create amm_base for you!
+
+If the button doesn't appear, you can also use the helper function. The error toast should guide you through it.`;
+
+          console.error('❌', errorMessage);
+          console.error('🔍 Full diagnostic details:', {
+            onChainCheck,
+            ammAccountExists: ammExists,
+            ammAccount: ammAccount.toBase58(),
+            tokenMint: tokenMintKey.toBase58()
+          });
+          throw new Error(errorMessage);
+        }
+      }
+      
+      // Add cook_base_token at index 10 - Used as fallback when amm_base is empty
+      // Derive cook_base_token ATA (for cook_pda to hold initial token supply)
+      const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
+      const cookBaseTokenATA = getAssociatedTokenAddressSync(
+        tokenMintKey,
+        cookPdaCorrect,
+        true, // allowOwnerOffCurve = true (cook_pda is a PDA, which is off-curve)
+        tokenProgram // Token-2022 program
+      );
+      instructionKeys.push({ pubkey: cookBaseTokenATA, isSigner: false, isWritable: true }); // cook_base_token (10)
+      
+      // Add system_program at index 11 - REQUIRED for system_instruction::transfer calls
+      instructionKeys.push({ pubkey: SystemProgram.programId, isSigner: false, isWritable: false }); // system_program (11)
+
+      // Add amm_quote at index 12 - REQUIRED for wrapped SOL transfers
+      const ammQuoteATA = getAssociatedTokenAddressSync(
+        WSOL_MINT_BUY, // Quote token is WSOL
+        ammAccount,
+        true, // allowOwnerOffCurve = true (ammAccount is a PDA)
+        TOKEN_2022_PROGRAM_ID // WSOL is Token-2022
+      );
+      instructionKeys.push({ pubkey: ammQuoteATA, isSigner: false, isWritable: true }); // amm_quote (12)
+
+      // Add quote_token_program at index 13 - REQUIRED for wrapped SOL transfers
+      instructionKeys.push({ pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }); // quote_token_program (13)
+
+      // Add user_wsol_account at index 14 - REQUIRED for unwrapping SOL on sell
+      const userWsolATA = getAssociatedTokenAddressSync(
+        WSOL_MINT_BUY,
+        userKey,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
+      instructionKeys.push({ pubkey: userWsolATA, isSigner: false, isWritable: true }); // user_wsol_account (14)
+
+      // Add ledger_wsol_account at index 15 - REQUIRED for fee collection in WSOL
+      const ledgerWsolATA = getAssociatedTokenAddressSync(
+        WSOL_MINT_BUY,
+        feesAccount,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
+      instructionKeys.push({ pubkey: ledgerWsolATA, isSigner: false, isWritable: true }); // ledger_wsol_account (15)
 
       console.log('🔍 Account Debug Info:', {
         userKey: userKey.toBase58(),
@@ -541,24 +1610,30 @@ export class TradingService {
       // Check each account individually and log detailed info
       console.log('🔍 Detailed Account Check:');
       instructionKeys.forEach((account, index) => {
+        const pubkeyStr = account.pubkey instanceof PublicKey 
+          ? account.pubkey.toBase58() 
+          : String(account.pubkey);
         console.log(`Account ${index}:`, {
-          pubkey: account.pubkey.toBase58(),
+          pubkey: pubkeyStr,
           isSigner: account.isSigner,
           isWritable: account.isWritable,
           exists: index < accountChecks.length ? !!accountChecks[index] : 'not checked'
         });
       });
 
-      // Check if AMM account is properly derived
-      const [expectedAmmAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenMintKey.toBuffer()],
-        PROGRAM_ID
-      );
+      // Verify AMM account derivation matches backend
+      const WSOL_MINT_VERIFY = new PublicKey('So11111111111111111111111111111111111111112');
+      const baseFirstVerify = tokenMintKey.toString() < WSOL_MINT_VERIFY.toString();
+      const ammSeedsVerify = baseFirstVerify
+        ? [tokenMintKey.toBuffer(), WSOL_MINT_VERIFY.toBuffer(), Buffer.from('CookAMM')]
+        : [WSOL_MINT_VERIFY.toBuffer(), tokenMintKey.toBuffer(), Buffer.from('CookAMM')];
+      const [expectedAmmAccount] = PublicKey.findProgramAddressSync(ammSeedsVerify, PROGRAM_ID);
       console.log('🔍 AMM Account Verification:', {
         derivedAmmAccount: expectedAmmAccount.toBase58(),
         usedAmmAccount: ammAccount.toBase58(),
         accountsMatch: expectedAmmAccount.equals(ammAccount),
-        ammAccountExists: !!accountChecks[2]
+        ammAccountExists: !!accountChecks[2],
+        derivationSeeds: baseFirstVerify ? '[base, WSOL, CookAMM]' : '[WSOL, base, CookAMM]'
       });
 
       // If AMM account doesn't exist, initialize it first IN A SEPARATE TRANSACTION
@@ -630,6 +1705,31 @@ export class TradingService {
       
       transaction.add(instruction);
       
+      // If graduation threshold will be met, add CreateRaydium instruction to same transaction
+      // This makes pool creation atomic with the swap
+      if (shouldCreateRaydiumPool) {
+        console.log('🚀 Graduation threshold will be met! Adding CreateRaydium instruction...');
+        
+        try {
+          const createRaydiumInstruction = await this.buildCreateRaydiumInstruction(
+            userKey,
+            tokenMintKey,
+            ammAccount,
+            totalSupply
+          );
+          
+          if (createRaydiumInstruction) {
+            transaction.add(createRaydiumInstruction);
+            console.log('✅ CreateRaydium instruction added to transaction');
+          } else {
+            console.warn('⚠️ Could not build CreateRaydium instruction, will rely on backend event');
+          }
+        } catch (error) {
+          console.error('❌ Error building CreateRaydium instruction:', error);
+          console.warn('⚠️ Will rely on backend GRADUATION_THRESHOLD_MET event for pool creation');
+        }
+      }
+      
       // Get recent blockhash
       const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
@@ -649,6 +1749,135 @@ export class TradingService {
           const [instructionIndex, error] = instructionError.InstructionError;
           
           console.error(`❌ Failed at instruction ${instructionIndex}:`, error);
+          
+          // Check if it's a "tokens not available" error (Custom: 3)
+          if (error && typeof error === 'object' && 'Custom' in error && error.Custom === 3) {
+            // Both amm_base and cook_base_token are empty
+            // Try to find where tokens actually are
+            console.error('🔍 Diagnosing token location issue...');
+            try {
+              const { TOKEN_2022_PROGRAM_ID } = await import('@solana/spl-token');
+              const { getMint } = await import('@solana/spl-token');
+              
+              // Get mint info to check supply
+              const mintInfo = await getMint(this.connection, tokenMintKey, 'confirmed', TOKEN_2022_PROGRAM_ID).catch(() => 
+                getMint(this.connection, tokenMintKey, 'confirmed')
+              );
+              
+              console.error(`📊 Mint supply: ${mintInfo.supply.toString()}`);
+              
+              // Try to find all token accounts for this mint
+              // Check known accounts first, then try to find others
+              try {
+                const accountsWithBalance: Array<{address: string, balance: string, owner: string}> = [];
+                
+                // Check known accounts: amm_base, cook_base_token, and the old amm_base
+                const knownAccounts = [
+                  { address: ammBaseTokenAccount, name: 'amm_base (current)' },
+                  { address: cookBaseTokenATA, name: 'cook_base_token' },
+                  { address: new PublicKey('G211TBJ2ELfPn4GTyhSx8e7JsRVfRhohV7o1cvFEEQb4'), name: 'amm_base (old, wrong authority)' },
+                ];
+                
+                for (const knownAccount of knownAccounts) {
+                  try {
+                    const parsed = await this.connection.getParsedAccountInfo(knownAccount.address);
+                    if (parsed.value && typeof parsed.value.data === 'object' && 'parsed' in parsed.value.data) {
+                      const parsedData = parsed.value.data.parsed as any;
+                      if (parsedData.info && parsedData.info.mint === tokenMintKey.toBase58() && parsedData.info.tokenAmount) {
+                        const balance = parsedData.info.tokenAmount.uiAmount || 0;
+                        const owner = parsedData.info.owner || 'unknown';
+                        if (balance > 0) {
+                          accountsWithBalance.push({
+                            address: knownAccount.address.toBase58(),
+                            balance: balance.toString(),
+                            owner: owner.toString(),
+                          });
+                          console.error(`  ${knownAccount.name}: ${balance} tokens (owner: ${owner})`);
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    // Account might not exist or be unparseable
+                  }
+                }
+                
+                // Also try to find other token accounts by checking common owners
+                // This is a simplified approach - full scan would be too expensive
+                try {
+                  const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
+                  const userTokenATA = getAssociatedTokenAddressSync(tokenMintKey, userKey, false, TOKEN_2022_PROGRAM_ID);
+                  const userParsed = await this.connection.getParsedAccountInfo(userTokenATA).catch(() => null);
+                  if (userParsed?.value && typeof userParsed.value.data === 'object' && 'parsed' in userParsed.value.data) {
+                    const parsedData = userParsed.value.data.parsed as any;
+                    if (parsedData.info && parsedData.info.tokenAmount) {
+                      const balance = parsedData.info.tokenAmount.uiAmount || 0;
+                      if (balance > 0) {
+                        accountsWithBalance.push({
+                          address: userTokenATA.toBase58(),
+                          balance: balance.toString(),
+                          owner: 'user',
+                        });
+                        console.error(`  User token account: ${balance} tokens`);
+                      }
+                    }
+                  }
+                } catch (e) {
+                  // Skip if can't check user account
+                }
+                
+                if (accountsWithBalance.length > 0) {
+                  console.error(`💰 Token accounts with balance:`);
+                  accountsWithBalance.forEach(acc => {
+                    console.error(`  - ${acc.address}: ${acc.balance} tokens (owner: ${acc.owner})`);
+                  });
+                  
+                  // Check if tokens are in the old amm_base account
+                  const oldAccount = accountsWithBalance.find(acc => 
+                    acc.address === 'G211TBJ2ELfPn4GTyhSx8e7JsRVfRhohV7o1cvFEEQb4'
+                  );
+                  
+                  if (oldAccount) {
+                    throw new Error(
+                      `Tokens are stuck in the old amm_base account (${oldAccount.address}) with wrong authority. ` +
+                      `The account has ${oldAccount.balance} tokens but cannot be used because the authority doesn't match the AMM account. ` +
+                      `Please contact support to recover these tokens or re-launch the token with proper setup.`
+                    );
+                  }
+                  
+                  throw new Error(
+                    `Tokens are not in the expected accounts (amm_base or cook_base_token). ` +
+                    `Found ${accountsWithBalance.length} account(s) with tokens. ` +
+                    `Please check the console for details. The swap cannot proceed until tokens are transferred to amm_base with the correct authority.`
+                  );
+                } else {
+                  throw new Error(
+                    `No tokens found in any token accounts. Mint supply: ${mintInfo.supply.toString()}, ` +
+                    `but all token accounts are empty. This suggests tokens were never minted or were burned. ` +
+                    `Please verify the launch was completed successfully.`
+                  );
+                }
+              } catch (diagnosticError: any) {
+                // If diagnostic fails, provide a generic error
+                if (diagnosticError.message && diagnosticError.message.includes('stuck') || diagnosticError.message.includes('not in the expected')) {
+                  throw diagnosticError;
+                }
+                console.error('⚠️ Could not complete full diagnostic:', diagnosticError);
+                throw new Error(
+                  `Both amm_base and cook_base_token are empty. Tokens may be stuck in an account with wrong authority. ` +
+                  `Check the simulation logs above for more details. Error code: Custom(3)`
+                );
+              }
+            } catch (diagnosticError: any) {
+              // If we already threw a specific error, re-throw it
+              if (diagnosticError.message) {
+                throw diagnosticError;
+              }
+              throw new Error(
+                `Both amm_base and cook_base_token are empty. Tokens may be stuck in an account with wrong authority. ` +
+                `Check the simulation logs above for more details. Error code: Custom(3)`
+              );
+            }
+          }
           
           if (error === 'BorshIoError') {
             throw new Error(`Transaction simulation failed: BorshIoError in instruction ${instructionIndex}. This usually means incorrect data serialization.`);
@@ -688,6 +1917,63 @@ export class TradingService {
       }, 'confirmed');
       
       console.log('✅ Instant swap transaction confirmed');
+      
+      // Update tokens_sold, current_price, and pool_sol_balance in Supabase after successful buy
+      try {
+        const { LaunchMetadataService } = await import('./launchMetadataService');
+        const { launchDataService } = await import('./launchDataService');
+        const { bondingCurveService } = await import('./bondingCurveService');
+        const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
+        
+        // Get updated tokensSold from blockchain
+        const launchData = await launchDataService.getLaunchByTokenMint(tokenMintKey.toBase58());
+        if (launchData && launchData.tokensSold !== undefined) {
+          const tokensSoldHuman = launchData.tokensSold; // Already in human-readable units
+          
+          // Calculate updated current_price from bonding curve
+          const metadata = await LaunchMetadataService.getMetadataByTokenMint(tokenMintKey.toBase58());
+          const totalSupply = metadata?.total_supply || launchData.totalSupply || 1000000000;
+          const decimals = metadata?.decimals || launchData.decimals || 9;
+          const currentPrice = bondingCurveService.calculatePrice({
+            totalSupply,
+            tokensSold: tokensSoldHuman,
+            decimals
+          });
+          
+          // Get updated pool_sol_balance from amm_quote (WSOL account)
+          let poolSolBalance = 0;
+          try {
+            const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+            const ammQuoteATA = getAssociatedTokenAddressSync(
+              WSOL_MINT,
+              ammAccount,
+              true, // allowOwnerOffCurve = true (ammAccount is a PDA)
+              TOKEN_2022_PROGRAM_ID
+            );
+            const ammQuoteInfo = await this.connection.getAccountInfo(ammQuoteATA);
+            if (ammQuoteInfo && ammQuoteInfo.data.length > 0) {
+              const amount = ammQuoteInfo.data.readBigUInt64LE(64);
+              poolSolBalance = Number(amount) / 1e9; // Convert to SOL
+            }
+          } catch (error) {
+            console.warn('⚠️ Could not get pool_sol_balance, keeping existing value:', error);
+          }
+          
+          // Update all fields in Supabase
+          await LaunchMetadataService.updateMetadata(tokenMintKey.toBase58(), {
+            tokens_sold: tokensSoldHuman,
+            current_price: currentPrice,
+            pool_sol_balance: poolSolBalance
+          });
+          console.log('✅ Updated launch metadata in Supabase:', {
+            tokens_sold: tokensSoldHuman,
+            current_price: currentPrice,
+            pool_sol_balance: poolSolBalance
+          });
+        }
+      } catch (updateError) {
+        console.warn('⚠️ Failed to update launch metadata in Supabase (non-critical):', updateError);
+      }
       
       return {
         success: true,
@@ -738,6 +2024,59 @@ export class TradingService {
       const userKey = new PublicKey(userPublicKey);
       const tokenMintKey = new PublicKey(tokenMint);
       
+      // Use Raydium if selected
+      if (dexProvider === 'raydium') {
+        try {
+          const { raydiumService } = await import('./raydiumService');
+          const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+          
+          // Find pool
+          const poolAddress = await raydiumService.findPool(tokenMintKey, WSOL_MINT);
+          
+          if (poolAddress) {
+            console.log('✅ Found Raydium pool, executing swap...');
+            
+            // Get token decimals (default to 9)
+            const mintInfo = await this.connection.getAccountInfo(tokenMintKey);
+            const decimals = mintInfo ? 9 : 9; // Simplified - would need proper parsing
+            
+            const amountIn = BigInt(Math.floor(tokenAmount * Math.pow(10, decimals)));
+            const quote = await raydiumService.getSwapQuote(
+              poolAddress,
+              tokenMintKey,
+              WSOL_MINT,
+              amountIn,
+              50 // 0.5% slippage
+            );
+            
+            if (quote) {
+              const minAmountOut = quote.outputAmount * BigInt(9950) / BigInt(10000); // 0.5% slippage
+              
+              const signature = await raydiumService.swap(
+                poolAddress,
+                userKey,
+                tokenMintKey,
+                WSOL_MINT,
+                amountIn,
+                minAmountOut,
+                signTransaction
+              );
+              
+              return {
+                success: true,
+                signature,
+                tokensReceived: tokenAmount,
+                solReceived: Number(quote.outputAmount) / 1e9
+              };
+            }
+          }
+          
+          console.log('⚠️ Raydium pool not found, falling back to Cook DEX');
+        } catch (raydiumError) {
+          console.error('❌ Raydium swap failed, falling back to Cook DEX:', raydiumError);
+        }
+      }
+      
       // Check if the provided tokenMint is actually an SPL token mint
       console.log('🔍 Checking if tokenMint is a real SPL token mint (sell)...');
       const mintAccountInfo = await this.connection.getAccountInfo(tokenMintKey);
@@ -755,11 +2094,14 @@ export class TradingService {
       const amountInLamports = Math.floor(solAmount * LAMPORTS_PER_SOL);
       const minimumSolAmount = Math.floor(amountInLamports * 0.995); // 0.5% slippage tolerance
       
-      // Derive the AMM account
-      const [ammAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenMintKey.toBuffer()],
-        PROGRAM_ID
-      );
+      // Derive the AMM account using the same seeds as backend
+      // Backend uses: [base_mint, quote_mint, b"CookAMM"] (sorted)
+      const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+      const baseFirst = tokenMintKey.toString() < WSOL_MINT.toString();
+      const ammSeeds = baseFirst
+        ? [tokenMintKey.toBuffer(), WSOL_MINT.toBuffer(), Buffer.from('CookAMM')]
+        : [WSOL_MINT.toBuffer(), tokenMintKey.toBuffer(), Buffer.from('CookAMM')];
+      const [ammAccount] = PublicKey.findProgramAddressSync(ammSeeds, PROGRAM_ID);
       
       // Create transaction
       const transaction = new Transaction();
@@ -802,8 +2144,37 @@ export class TradingService {
         // Try using variant index approach instead of discriminator
         console.log('🍳 Using CookDEX SwapCookAMM instruction for sell (variant index)');
         
-        // Use PlaceOrderArgs structure like buy instruction (36 bytes)
-        const argsBuffer = Buffer.alloc(36); // Exact size: 1 + 8 + 8 + 8 + 1 + 8 + 2 = 36 bytes
+        // Get launch data to extract state fields
+        let isInstantLaunch = 0;
+        let isGraduated = 0;
+        let tokensSold = 0;
+        let totalSupply = 0;
+        let creatorKey = PublicKey.default;
+        
+        try {
+          const launchData = await launchDataService.getLaunchByTokenMint(tokenMintKey.toBase58());
+          if (launchData) {
+            isInstantLaunch = launchData.launchType === 'instant' ? 1 : 0;
+            isGraduated = launchData.isGraduated === true ? 1 : 0;
+            
+            // Convert to raw units, but clamp to u64 max to prevent overflow
+            const U64_MAX = BigInt('18446744073709551615');
+            const rawTokensSold = BigInt(Math.floor((launchData.tokensSold || 0) * 1e9));
+            tokensSold = Number(rawTokensSold > U64_MAX ? U64_MAX : rawTokensSold);
+            
+            const rawTotalSupply = BigInt(Math.floor((launchData.totalSupply || 0) * 1e9));
+            totalSupply = Number(rawTotalSupply > U64_MAX ? U64_MAX : rawTotalSupply);
+            
+            if (launchData.creator) {
+              creatorKey = new PublicKey(launchData.creator);
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not get launch data for sell args, using defaults:', error);
+        }
+        
+        // Use PlaceOrderArgs structure like buy instruction (86 bytes with new fields)
+        const argsBuffer = Buffer.alloc(86); // Exact size: 1 + 8 + 8 + 8 + 1 + 8 + 2 + 1 + 1 + 8 + 8 + 32 = 86 bytes
         let offset = 0;
         
         // Convert token amount to smallest unit (assuming 9 decimals like SOL)
@@ -835,6 +2206,27 @@ export class TradingService {
         
         // Write limit (u16): 0 for no limit
         argsBuffer.writeUInt16LE(0, offset);
+        offset += 2;
+        
+        // Write is_instant_launch (u8): 0 = false, 1 = true
+        argsBuffer.writeUInt8(isInstantLaunch, offset);
+        offset += 1;
+        
+        // Write is_graduated (u8): 0 = false, 1 = true
+        argsBuffer.writeUInt8(isGraduated, offset);
+        offset += 1;
+        
+        // Write tokens_sold (u64): current tokens sold for bonding curve
+        argsBuffer.writeBigUInt64LE(BigInt(tokensSold), offset);
+        offset += 8;
+        
+        // Write total_supply (u64): total supply for creator limit check
+        argsBuffer.writeBigUInt64LE(BigInt(totalSupply), offset);
+        offset += 8;
+        
+        // Write creator_key (Pubkey, 32 bytes)
+        argsBuffer.set(creatorKey.toBytes(), offset);
+        offset += 32;
         
         instructionData = Buffer.concat([
           Buffer.from([10]), // SwapCookAMM variant index (10, not 20)
@@ -951,11 +2343,89 @@ export class TradingService {
         tokenProgram: tokenProgram.toBase58()
       });
       
-      // Backend account structure for SwapCookAMM:
-      // CRITICAL: Backend uses accounts[6] for system_program in invoke_signed, but checks
-      // if accounts.len() > 6 to treat account[6] as launch_data for trading gate.
-      // This is a backend bug. We must pass system_program and token_program even though
-      // the backend references them incorrectly. The backend needs these for CPI calls.
+      // Derive cook_pda (needed for mint authority)
+      const SOL_SEED = 59957379;
+      const solSeedBuffer = Buffer.alloc(4);
+      solSeedBuffer.writeUInt32LE(SOL_SEED, 0);
+      const [cookPdaCorrect] = PublicKey.findProgramAddressSync(
+        [solSeedBuffer],
+        PROGRAM_ID
+      );
+      
+      // Find amm_base token account (for bonding curve sells)
+      // PRIORITY 1: Try to get from Supabase first (fastest and most reliable)
+      // PRIORITY 2: Query blockchain if Supabase doesn't have it
+      let ammBaseTokenAccount: PublicKey | null = null;
+      try {
+        // PRIORITY 1: Try Supabase first (stored during launch creation)
+        console.log('🔍 Searching for amm_base token account (sell)...');
+        console.log('  AMM Account:', ammAccount.toBase58());
+        console.log('  Token Mint:', tokenMintKey.toBase58());
+        console.log('  📦 Checking Supabase first...');
+        
+        try {
+          // Try launch metadata service first (Supabase)
+          const { LaunchMetadataService } = await import('./launchMetadataService');
+          const metadata = await LaunchMetadataService.getMetadataByTokenMint(tokenMintKey.toBase58());
+          if (metadata && metadata.amm_base_token_account) {
+            ammBaseTokenAccount = new PublicKey(metadata.amm_base_token_account);
+            console.log('✅ Found amm_base from Supabase (launch metadata) for sell:', ammBaseTokenAccount.toBase58());
+            
+            // Verify it exists on-chain
+            const verifyInfo = await this.connection.getAccountInfo(ammBaseTokenAccount).catch(() => null);
+            if (!verifyInfo) {
+              console.warn('⚠️ amm_base from Supabase does not exist on-chain, will try blockchain query');
+              ammBaseTokenAccount = null; // Mark as invalid, try blockchain query
+            }
+          } else {
+            // Try launch data service as fallback
+            const launchData = await launchDataService.getLaunchByTokenMint(tokenMintKey.toBase58());
+            if (launchData && (launchData as any).ammBaseTokenAccount) {
+              ammBaseTokenAccount = new PublicKey((launchData as any).ammBaseTokenAccount);
+              console.log('✅ Found amm_base from launch data service for sell:', ammBaseTokenAccount.toBase58());
+              
+              // Verify it exists on-chain
+              const verifyInfo = await this.connection.getAccountInfo(ammBaseTokenAccount).catch(() => null);
+              if (!verifyInfo) {
+                console.warn('⚠️ amm_base from launch data service does not exist on-chain, will try blockchain query');
+                ammBaseTokenAccount = null;
+              }
+            }
+          }
+        } catch (supabaseError) {
+          console.warn('⚠️ Could not get amm_base from Supabase for sell, will try blockchain query:', supabaseError);
+        }
+        
+        // PRIORITY 2: Query blockchain if Supabase doesn't have it
+        if (!ammBaseTokenAccount) {
+          console.log('  🔗 Querying blockchain for amm_base (sell)...');
+          
+          // Use connection.getParsedTokenAccountsByOwner which is available in @solana/web3.js
+          const response = await this.connection.getParsedTokenAccountsByOwner(
+            ammAccount,
+            { mint: tokenMintKey },
+            'confirmed'
+          );
+          
+          if (response.value && response.value.length > 0) {
+            const accountInfo = response.value[0];
+            if (accountInfo.pubkey) {
+              ammBaseTokenAccount = accountInfo.pubkey;
+              console.log('✅ Found amm_base token account from blockchain for sell:', ammBaseTokenAccount.toBase58());
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not find amm_base token account for sell:', error);
+      }
+      
+      // Backend account structure for SwapCookAMM (matches buy path):
+      // 0-5: user, token_mint, amm_account, user_token_account, user_sol_account, ledger_wallet
+      // 6: launch_data (optional)
+      // 7: token_program
+      // 8: cook_pda
+      // 9: amm_base (optional, for bonding curve)
+      // 10: system_program
       const instructionKeys = [
         { pubkey: userKey, isSigner: true, isWritable: true },           // user (0)
         { pubkey: tokenMintKey, isSigner: false, isWritable: true },     // token_mint (1)
@@ -963,9 +2433,71 @@ export class TradingService {
         { pubkey: userTokenAccount, isSigner: false, isWritable: true },  // user_token_account (3)
         { pubkey: userSolAccount, isSigner: false, isWritable: true },   // user_sol_account (4)
         { pubkey: feesAccount, isSigner: false, isWritable: true },       // ledger_wallet (5)
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program (6)
-        { pubkey: tokenProgram, isSigner: false, isWritable: false },    // token_program (7)
       ];
+      
+      // Add launch_data at index 6 (if it exists)
+      if (launchAccountInfo) {
+        instructionKeys.push({ pubkey: launchDataAccount, isSigner: false, isWritable: true }); // launch_data (6)
+      }
+      
+      // Add token_program at index 7
+      instructionKeys.push({ pubkey: tokenProgram, isSigner: false, isWritable: false }); // token_program (7)
+      
+      // Add cook_pda at index 8
+      instructionKeys.push({ pubkey: cookPdaCorrect, isSigner: false, isWritable: false }); // cook_pda (8)
+      
+      // Add amm_base at index 9 (optional, for bonding curve)
+      if (ammBaseTokenAccount) {
+        instructionKeys.push({ pubkey: ammBaseTokenAccount, isSigner: false, isWritable: true }); // amm_base (9)
+      } else {
+        // Use a dummy token account address that's NOT System Program to avoid conflicts
+        const dummyTokenAccount = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'); // SPL Token Program
+        instructionKeys.push({ pubkey: dummyTokenAccount, isSigner: false, isWritable: true }); // Placeholder (9)
+      }
+      
+      // Add cook_base_token at index 10 - Used as fallback when amm_base is empty (for sell, usually not needed)
+      const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
+      const cookBaseTokenATA = getAssociatedTokenAddressSync(
+        tokenMintKey,
+        cookPdaCorrect,
+        true, // allowOwnerOffCurve = true (cook_pda is a PDA, which is off-curve)
+        tokenProgram // Token-2022 program
+      );
+      instructionKeys.push({ pubkey: cookBaseTokenATA, isSigner: false, isWritable: true }); // cook_base_token (10)
+      
+      // Add system_program at index 11 - REQUIRED for system_instruction::transfer calls
+      instructionKeys.push({ pubkey: SystemProgram.programId, isSigner: false, isWritable: false }); // system_program (11)
+
+      // Add amm_quote at index 12 - REQUIRED for wrapped SOL transfers
+      const WSOL_MINT_SELL = new PublicKey('So11111111111111111111111111111111111111112');
+      const ammQuoteATASell = getAssociatedTokenAddressSync(
+        WSOL_MINT_SELL, // Quote token is WSOL
+        ammAccount,
+        true, // allowOwnerOffCurve = true (ammAccount is a PDA)
+        TOKEN_2022_PROGRAM_ID // WSOL is Token-2022
+      );
+      instructionKeys.push({ pubkey: ammQuoteATASell, isSigner: false, isWritable: true }); // amm_quote (12)
+
+      // Add quote_token_program at index 13 - REQUIRED for wrapped SOL transfers
+      instructionKeys.push({ pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }); // quote_token_program (13)
+
+      // Add user_wsol_account at index 14 - REQUIRED for unwrapping SOL on sell
+      const userWsolATASell = getAssociatedTokenAddressSync(
+        WSOL_MINT_SELL,
+        userKey,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
+      instructionKeys.push({ pubkey: userWsolATASell, isSigner: false, isWritable: true }); // user_wsol_account (14)
+
+      // Add ledger_wsol_account at index 15 - REQUIRED for fee collection in WSOL
+      const ledgerWsolATASell = getAssociatedTokenAddressSync(
+        WSOL_MINT_SELL,
+        feesAccount,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
+      instructionKeys.push({ pubkey: ledgerWsolATASell, isSigner: false, isWritable: true }); // ledger_wsol_account (15)
       
       console.log('🔍 Sell instruction accounts:', instructionKeys.map((key, index) => ({
         index,
@@ -1040,6 +2572,63 @@ export class TradingService {
         }
         
         console.log('✅ Instant swap transaction confirmed');
+        
+        // Update tokens_sold, current_price, and pool_sol_balance in Supabase after successful sell
+        try {
+          const { LaunchMetadataService } = await import('./launchMetadataService');
+          const { launchDataService } = await import('./launchDataService');
+          const { bondingCurveService } = await import('./bondingCurveService');
+          const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
+          
+          // Get updated tokensSold from blockchain
+          const launchData = await launchDataService.getLaunchByTokenMint(tokenMintKey.toBase58());
+          if (launchData && launchData.tokensSold !== undefined) {
+            const tokensSoldHuman = launchData.tokensSold; // Already in human-readable units
+            
+            // Calculate updated current_price from bonding curve
+            const metadata = await LaunchMetadataService.getMetadataByTokenMint(tokenMintKey.toBase58());
+            const totalSupply = metadata?.total_supply || launchData.totalSupply || 1000000000;
+            const decimals = metadata?.decimals || launchData.decimals || 9;
+            const currentPrice = bondingCurveService.calculatePrice({
+              totalSupply,
+              tokensSold: tokensSoldHuman,
+              decimals
+            });
+            
+            // Get updated pool_sol_balance from amm_quote (WSOL account)
+            let poolSolBalance = 0;
+            try {
+              const WSOL_MINT_SELL = new PublicKey('So11111111111111111111111111111111111111112');
+              const ammQuoteATASell = getAssociatedTokenAddressSync(
+                WSOL_MINT_SELL,
+                ammAccount,
+                true, // allowOwnerOffCurve = true (ammAccount is a PDA)
+                TOKEN_2022_PROGRAM_ID
+              );
+              const ammQuoteInfo = await this.connection.getAccountInfo(ammQuoteATASell);
+              if (ammQuoteInfo && ammQuoteInfo.data.length > 0) {
+                const amount = ammQuoteInfo.data.readBigUInt64LE(64);
+                poolSolBalance = Number(amount) / 1e9; // Convert to SOL
+              }
+            } catch (error) {
+              console.warn('⚠️ Could not get pool_sol_balance, keeping existing value:', error);
+            }
+            
+            // Update all fields in Supabase
+            await LaunchMetadataService.updateMetadata(tokenMintKey.toBase58(), {
+              tokens_sold: tokensSoldHuman,
+              current_price: currentPrice,
+              pool_sol_balance: poolSolBalance
+            });
+            console.log('✅ Updated launch metadata in Supabase:', {
+              tokens_sold: tokensSoldHuman,
+              current_price: currentPrice,
+              pool_sol_balance: poolSolBalance
+            });
+          }
+        } catch (updateError) {
+          console.warn('⚠️ Failed to update launch metadata in Supabase (non-critical):', updateError);
+        }
       } catch (confirmationError) {
         console.warn('⚠️ Transaction confirmation timeout or error:', confirmationError);
         // Don't fail the entire operation if confirmation times out
@@ -1073,7 +2662,10 @@ export class TradingService {
     success: boolean;
     signature?: string;
     error?: string;
+    orderId?: string;
   }> {
+    let joinDataPda: PublicKey | null = null;
+    
     try {
       console.log('🎫 Buying tickets:', { raffleId, userPublicKey, ticketCount, totalCost });
       
@@ -1083,6 +2675,21 @@ export class TradingService {
       const launchDataAccount = new PublicKey(raffleId);
       
       console.log('🔍 Using launch data account:', launchDataAccount.toBase58());
+      
+      // Fetch launch data to get page_name for JoinData PDA derivation
+      const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
+      if (!launchAccountInfo) {
+        throw new Error('Raffle account not found');
+      }
+      
+      // Parse page_name from launch data (skip account_type and launch_meta)
+      let offset = 1; // Skip account_type
+      offset += 1; // Skip launch_meta discriminator
+      offset += 4; // Skip plugins vector length
+      const pageNameLength = Buffer.from(launchAccountInfo.data).readUInt32LE(offset);
+      offset += 4;
+      const pageName = Buffer.from(launchAccountInfo.data).toString('utf8', offset, offset + pageNameLength);
+      console.log('📄 Found page_name:', pageName);
       
       // Calculate amount in lamports
       const amountInLamports = Math.floor(totalCost * LAMPORTS_PER_SOL);
@@ -1110,6 +2717,16 @@ export class TradingService {
       // Ledger wallet for platform fees - loaded from environment variable
       const LEDGER_WALLET = new PublicKey(import.meta.env.VITE_LEDGER_WALLET || 'A3pqxWWtgxY9qspd4wffSJQNAb99bbrUHYb1doMQmPcK');
       
+      // Derive JoinData PDA for tracking user purchases
+      // Seed: [user_key, page_name, "Joiner"]
+      const joinDataPdaResult = PublicKey.findProgramAddressSync(
+        [userPubkey.toBuffer(), Buffer.from(pageName), Buffer.from('Joiner')],
+        PROGRAM_ID
+      );
+      joinDataPda = joinDataPdaResult[0];
+      
+      console.log('🔍 JoinData PDA:', joinDataPda.toBase58());
+      
       // Note: userPubkey appears twice because backend expects:
       // accounts[0] = user (signer)
       // accounts[2] = user_sol_account (for SOL transfers)
@@ -1122,6 +2739,7 @@ export class TradingService {
           { pubkey: userPubkey, isSigner: true, isWritable: true },         // accounts[2]: user_sol_account (same as user)
           { pubkey: LEDGER_WALLET, isSigner: false, isWritable: true },     // accounts[3]: ledger_wallet
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // accounts[4]: system_program
+          { pubkey: joinDataPda, isSigner: false, isWritable: true },       // accounts[5]: join_data (new)
         ],
         programId: PROGRAM_ID,
         data: instructionData,
@@ -1132,16 +2750,13 @@ export class TradingService {
         launchData: launchDataAccount.toBase58(),
         userSolAccount: userPubkey.toBase58(),
         ledgerWallet: LEDGER_WALLET.toBase58(),
-        systemProgram: SystemProgram.programId.toBase58()
+        systemProgram: SystemProgram.programId.toBase58(),
+        joinData: joinDataPda.toBase58()
       });
       
       // Debug: Check if all accounts exist before creating transaction
       console.log('🔍 Checking all accounts before transaction...');
       
-      const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
-      if (!launchAccountInfo) {
-        throw new Error('Raffle account not found');
-      }
       console.log('📊 Launch data account info:', {
         exists: true,
         owner: launchAccountInfo.owner.toBase58(),
@@ -1178,7 +2793,7 @@ export class TradingService {
       // Simulate transaction before sending
       console.log('🧪 Simulating buy tickets transaction...');
       try {
-        const simResult = await this.connection.simulateTransaction(transaction, undefined, { commitment: 'confirmed', replaceRecentBlockhash: true });
+        const simResult = await this.connection.simulateTransaction(transaction);
         
         console.log('📊 Simulation result:', {
           err: simResult.value.err,
@@ -1251,13 +2866,219 @@ export class TradingService {
       
       return {
         success: true,
-        signature: signature
+        signature: signature,
+        orderId: joinDataPda.toBase58() // Use JoinData PDA as order ID
       };
     } catch (error) {
       console.error('❌ Error buying tickets:', error);
+      
+      // Check if error is due to already purchased tickets
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('already purchased') || errorMessage.includes('already bought')) {
+        return {
+          success: false,
+          error: `You have already purchased tickets for this raffle. Order ID: ${joinDataPda?.toBase58() || 'Unknown'}`,
+          orderId: joinDataPda?.toBase58()
+        };
+      }
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to buy tickets'
+        error: errorMessage
+      };
+    }
+  }
+
+  /**
+   * Get user's ticket purchase status for a raffle
+   */
+  async getUserTicketStatus(
+    raffleId: string,
+    userPublicKey: string
+  ): Promise<{
+    hasTickets: boolean;
+    orderId?: string;
+    numTickets?: number;
+    isWinner?: boolean;
+    canClaim?: boolean;
+    canRefund?: boolean;
+  }> {
+    try {
+      const userPubkey = new PublicKey(userPublicKey);
+      const launchDataAccount = new PublicKey(raffleId);
+      
+      // Fetch launch data to get page_name
+      const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
+      if (!launchAccountInfo) {
+        return { hasTickets: false };
+      }
+      
+      // Parse page_name
+      let offset = 1; // Skip account_type
+      offset += 1; // Skip launch_meta discriminator
+      offset += 4; // Skip plugins vector length
+      const pageNameLength = Buffer.from(launchAccountInfo.data).readUInt32LE(offset);
+      offset += 4;
+      const pageName = Buffer.from(launchAccountInfo.data).toString('utf8', offset, offset + pageNameLength);
+      
+      // Derive JoinData PDA
+      const joinDataPdaResult = PublicKey.findProgramAddressSync(
+        [userPubkey.toBuffer(), Buffer.from(pageName), Buffer.from('Joiner')],
+        PROGRAM_ID
+      );
+      const joinDataPda = joinDataPdaResult[0];
+      
+      // Fetch JoinData account
+      const joinAccountInfo = await this.connection.getAccountInfo(joinDataPda);
+      if (!joinAccountInfo || joinAccountInfo.data.length === 0) {
+        return { hasTickets: false };
+      }
+      
+      // Parse JoinData
+      let joinOffset = 1; // Skip account_type
+      const joinerKey = new PublicKey(Buffer.from(joinAccountInfo.data.slice(joinOffset, joinOffset + 32)));
+      joinOffset += 32;
+      
+      const joinPageNameLength = Buffer.from(joinAccountInfo.data).readUInt32LE(joinOffset);
+      joinOffset += 4;
+      const joinPageName = Buffer.from(joinAccountInfo.data).toString('utf8', joinOffset, joinOffset + joinPageNameLength);
+      joinOffset += joinPageNameLength;
+      
+      const numTickets = Buffer.from(joinAccountInfo.data).readUInt16LE(joinOffset);
+      joinOffset += 2;
+      const numTicketsChecked = Buffer.from(joinAccountInfo.data).readUInt16LE(joinOffset);
+      joinOffset += 2;
+      const numWinningTickets = Buffer.from(joinAccountInfo.data).readUInt16LE(joinOffset);
+      joinOffset += 2;
+      
+      // Parse ticket_status (enum)
+      const ticketStatus = Buffer.from(joinAccountInfo.data).readUInt8(joinOffset);
+      
+      console.log('🎫 User ticket status:', {
+        numTickets,
+        numTicketsChecked,
+        numWinningTickets,
+        ticketStatus
+      });
+      
+      const isWinner = numWinningTickets > 0;
+      const canClaim = isWinner && ticketStatus === 0; // TicketStatus::Available
+      const canRefund = !isWinner && numTicketsChecked > 0;
+      
+      return {
+        hasTickets: numTickets > 0,
+        orderId: joinDataPda.toBase58(),
+        numTickets,
+        isWinner,
+        canClaim,
+        canRefund
+      };
+    } catch (error) {
+      console.error('❌ Error fetching user ticket status:', error);
+      return { hasTickets: false };
+    }
+  }
+
+  /**
+   * Check tickets to determine winners (call this after raffle ends)
+   */
+  async checkTickets(
+    raffleId: string,
+    userPublicKey: string,
+    signTransaction: any
+  ): Promise<{
+    success: boolean;
+    signature?: string;
+    isWinner?: boolean;
+    winningTickets?: number;
+    error?: string;
+  }> {
+    try {
+      console.log('🔍 Checking tickets for raffle:', raffleId);
+      
+      const userPubkey = new PublicKey(userPublicKey);
+      const launchDataAccount = new PublicKey(raffleId);
+      
+      // Fetch launch data to get page_name
+      const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
+      if (!launchAccountInfo) {
+        throw new Error('Raffle account not found');
+      }
+      
+      // Parse page_name
+      let offset = 1; // Skip account_type
+      offset += 1; // Skip launch_meta discriminator
+      offset += 4; // Skip plugins vector length
+      const pageNameLength = Buffer.from(launchAccountInfo.data).readUInt32LE(offset);
+      offset += 4;
+      const pageName = Buffer.from(launchAccountInfo.data).toString('utf8', offset, offset + pageNameLength);
+      
+      // Derive JoinData PDA
+      const joinDataPdaResult = PublicKey.findProgramAddressSync(
+        [userPubkey.toBuffer(), Buffer.from(pageName), Buffer.from('Joiner')],
+        PROGRAM_ID
+      );
+      const joinDataPda = joinDataPdaResult[0];
+      
+      // CheckTickets instruction data (index 3)
+      const instructionData = Buffer.from([3]);
+      
+      // Orao randomness oracle account for devnet
+      // This is the VRF program account that provides on-chain randomness
+      const ORAO_RANDOM = new PublicKey('VRFzZoJdhFWL8rkvu87LpKM3RbcVezpMEc6X5GVDr7y');
+      
+      const transaction = new Transaction();
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = userPubkey;
+      
+      const instruction = new TransactionInstruction({
+        keys: [
+          { pubkey: userPubkey, isSigner: true, isWritable: true },
+          { pubkey: launchDataAccount, isSigner: false, isWritable: true },
+          { pubkey: joinDataPda, isSigner: false, isWritable: true },
+          { pubkey: ORAO_RANDOM, isSigner: false, isWritable: false }, // Orao randomness oracle
+        ],
+        programId: PROGRAM_ID,
+        data: instructionData,
+      });
+      
+      transaction.add(instruction);
+      
+      const signature = await signTransaction(transaction);
+      console.log('✅ CheckTickets transaction sent:', signature);
+      
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      
+      // Fetch updated JoinData to check if user won
+      const updatedJoinInfo = await this.connection.getAccountInfo(joinDataPda);
+      if (updatedJoinInfo) {
+        let joinOffset = 1; // Skip account_type
+        joinOffset += 32; // Skip joiner_key
+        const joinPageNameLength = Buffer.from(updatedJoinInfo.data).readUInt32LE(joinOffset);
+        joinOffset += 4 + joinPageNameLength;
+        const numTickets = Buffer.from(updatedJoinInfo.data).readUInt16LE(joinOffset);
+        joinOffset += 2;
+        const numTicketsChecked = Buffer.from(updatedJoinInfo.data).readUInt16LE(joinOffset);
+        joinOffset += 2;
+        const numWinningTickets = Buffer.from(updatedJoinInfo.data).readUInt16LE(joinOffset);
+        
+        const isWinner = numWinningTickets > 0;
+        
+        return {
+          success: true,
+          signature,
+          isWinner,
+          winningTickets: numWinningTickets
+        };
+      }
+      
+      return { success: true, signature };
+    } catch (error) {
+      console.error('❌ Error checking tickets:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to check tickets'
       };
     }
   }
@@ -1279,25 +3100,56 @@ export class TradingService {
       console.log('🎁 Claiming tokens for raffle:', raffleId);
       
       const userPubkey = new PublicKey(userPublicKey);
-      const rafflePubkey = new PublicKey(raffleId);
+      const launchDataAccount = new PublicKey(raffleId);
       
-      // Derive the actual token mint from the raffle account
-      // For now, we'll use the raffle ID as the token mint (this needs to be verified)
-      const tokenMint = rafflePubkey;
+      // Fetch launch data to get page_name and baseTokenMint
+      const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
+      if (!launchAccountInfo) {
+        throw new Error('Raffle account not found');
+      }
+      
+      // Parse page_name
+      let offset = 1; // Skip account_type
+      offset += 1; // Skip launch_meta discriminator
+      offset += 4; // Skip plugins vector length
+      const pageNameLength = Buffer.from(launchAccountInfo.data).readUInt32LE(offset);
+      offset += 4;
+      const pageName = Buffer.from(launchAccountInfo.data).toString('utf8', offset, offset + pageNameLength);
+      
+      // Derive JoinData PDA
+      const joinDataPdaResult = PublicKey.findProgramAddressSync(
+        [userPubkey.toBuffer(), Buffer.from(pageName), Buffer.from('Joiner')],
+        PROGRAM_ID
+      );
+      const joinDataPda = joinDataPdaResult[0];
+      
+      // Parse baseTokenMint from keys array (offset starts after strings)
+      // For now, try to get it from the RaffleData
+      let baseTokenMint: PublicKey;
+      try {
+        // Try to get from the account structure - approximate location
+        const keysOffset = offset + pageNameLength + 200; // Approximate
+        const mintBytes = Buffer.from(launchAccountInfo.data.slice(keysOffset, keysOffset + 32));
+        baseTokenMint = new PublicKey(mintBytes);
+      } catch {
+        // Fallback: use a placeholder
+        baseTokenMint = launchDataAccount;
+      }
       
       // Check if this is a Token 2022 mint
-      const mintAccountInfo = await this.throttledRequest(() => this.connection.getAccountInfo(tokenMint));
+      const mintAccountInfo = await this.throttledRequest(() => this.connection.getAccountInfo(baseTokenMint));
       const isToken2022 = mintAccountInfo?.owner.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
       const tokenProgram = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
       
       // Get the user's Associated Token Account for this token mint
-      const userTokenAccount = await getAssociatedTokenAddress(tokenMint, userPubkey);
+      const userTokenAccount = await getAssociatedTokenAddress(baseTokenMint, userPubkey);
       
       console.log('🎯 Claim tokens details:', {
         raffleId: raffleId,
-        tokenMint: tokenMint.toBase58(),
+        tokenMint: baseTokenMint.toBase58(),
         userTokenAccount: userTokenAccount.toBase58(),
-        user: userPubkey.toBase58()
+        user: userPubkey.toBase58(),
+        joinData: joinDataPda.toBase58()
       });
       
       // Create instruction data for ClaimTokens (no args needed)
@@ -1306,11 +3158,12 @@ export class TradingService {
       const instruction = new TransactionInstruction({
         keys: [
           { pubkey: userPubkey, isSigner: true, isWritable: true },        // user
-          { pubkey: rafflePubkey, isSigner: false, isWritable: true },     // launch_data
+          { pubkey: launchDataAccount, isSigner: false, isWritable: true },     // launch_data
           { pubkey: userTokenAccount, isSigner: false, isWritable: true }, // user_token_account
-          { pubkey: tokenMint, isSigner: false, isWritable: true },        // token_mint
+          { pubkey: baseTokenMint, isSigner: false, isWritable: true },        // token_mint
           { pubkey: tokenProgram, isSigner: false, isWritable: false }, // token_program
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+          { pubkey: joinDataPda, isSigner: false, isWritable: true }, // join_data (new)
         ],
         programId: PROGRAM_ID,
         data: instructionData,
@@ -1396,7 +3249,34 @@ export class TradingService {
       console.log('💰 Claiming refund for raffle:', raffleId);
       
       const userPubkey = new PublicKey(userPublicKey);
-      const rafflePubkey = new PublicKey(raffleId);
+      const launchDataAccount = new PublicKey(raffleId);
+      
+      // Fetch launch data to get page_name
+      const launchAccountInfo = await this.connection.getAccountInfo(launchDataAccount);
+      if (!launchAccountInfo) {
+        throw new Error('Raffle account not found');
+      }
+      
+      // Parse page_name
+      let offset = 1; // Skip account_type
+      offset += 1; // Skip launch_meta discriminator
+      offset += 4; // Skip plugins vector length
+      const pageNameLength = Buffer.from(launchAccountInfo.data).readUInt32LE(offset);
+      offset += 4;
+      const pageName = Buffer.from(launchAccountInfo.data).toString('utf8', offset, offset + pageNameLength);
+      
+      // Derive JoinData PDA
+      const joinDataPdaResult = PublicKey.findProgramAddressSync(
+        [userPubkey.toBuffer(), Buffer.from(pageName), Buffer.from('Joiner')],
+        PROGRAM_ID
+      );
+      const joinDataPda = joinDataPdaResult[0];
+      
+      console.log('🔍 Claim refund details:', {
+        raffleId: raffleId,
+        user: userPubkey.toBase58(),
+        joinData: joinDataPda.toBase58()
+      });
       
       // Create instruction data for ClaimRefund (no args needed)
       const instructionData = Buffer.from([6]); // ClaimRefund variant index
@@ -1404,8 +3284,9 @@ export class TradingService {
       const instruction = new TransactionInstruction({
         keys: [
           { pubkey: userPubkey, isSigner: true, isWritable: true },        // user
-          { pubkey: rafflePubkey, isSigner: false, isWritable: true },     // launch_data
+          { pubkey: launchDataAccount, isSigner: false, isWritable: true },     // launch_data
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+          { pubkey: joinDataPda, isSigner: false, isWritable: true }, // join_data (new)
         ],
         programId: PROGRAM_ID,
         data: instructionData,
@@ -1791,6 +3672,418 @@ export class TradingService {
       return null;
     }
   }
+
+  /**
+   * Get available tokens from all launches (with caching)
+   */
+  async getAvailableTokens(forceRefresh: boolean = false): Promise<TokenInfo[]> {
+    // Import tradeCache once at the top
+    const { tradeCache } = await import('./tradeCache');
+    
+    try {
+      // Check cache first
+      if (!forceRefresh) {
+        const cached = tradeCache.getTokens();
+        if (cached) {
+          console.log('📦 Using cached token data');
+          return cached;
+        }
+      }
+      
+      const { launchDataService } = await import('./launchDataService');
+      
+      // Get cached launch IDs to check for new launches only
+      const cachedLaunchIds = tradeCache.getLaunchIds();
+      let launches;
+      
+      if (cachedLaunchIds && !forceRefresh) {
+        // Only fetch new launches
+        console.log('🔄 Checking for new launches only...');
+        const allLaunches = await launchDataService.getAllLaunches();
+        const allLaunchIds = allLaunches.map(l => l.id);
+        const newLaunchIds = tradeCache.updateLaunchCache(allLaunchIds);
+        
+        if (newLaunchIds.length === 0) {
+          // No new launches, use cached tokens
+          const cached = tradeCache.getTokens();
+          if (cached) {
+            console.log('✅ No new launches, using cached tokens');
+            return cached;
+          }
+        } else {
+          console.log(`🆕 Found ${newLaunchIds.length} new launches`);
+          // Only process new launches and merge with cached
+          launches = allLaunches;
+        }
+      } else {
+        // First load or force refresh - fetch all
+        console.log('🔄 Fetching all launches...');
+        launches = await launchDataService.getAllLaunches();
+        const allLaunchIds = launches.map(l => l.id);
+        tradeCache.updateLaunchCache(allLaunchIds);
+      }
+      
+      // Filter for instant launches (tradable tokens)
+      const instantLaunches = (launches || []).filter(launch => launch.launchType === 'instant');
+      
+      const tokens: (TokenInfo | null)[] = await Promise.all(
+        instantLaunches.map(async (launch) => {
+          try {
+            const tokenMint = new PublicKey(launch.baseTokenMint || launch.id);
+            
+            // Get token metadata
+            const symbol = launch.rawMetadata?.tokenSymbol || launch.symbol || 'UNKNOWN';
+            const name = launch.rawMetadata?.tokenName || launch.name || 'Unknown Token';
+            
+            // Get market data (price, volume, etc.)
+            let price = launch.initialPrice || 0.01;
+            let change24h = 0;
+            let volume24h = 0;
+            let liquidity = 0;
+            
+            try {
+              const { marketDataService } = await import('./marketDataService');
+              const marketData = await marketDataService.getMarketData(
+                tokenMint.toBase58(),
+                launch.totalSupply
+              );
+              price = marketData.price || price;
+              change24h = (marketData as any).change24h || 0;
+              volume24h = marketData.volume24h || 0;
+              liquidity = marketData.liquidity || 0;
+            } catch (error) {
+              console.warn('Could not fetch market data for token:', error);
+            }
+            
+            return {
+              symbol,
+              name,
+              mint: tokenMint,
+              price,
+              change24h,
+              volume24h,
+              holders: launch.participants || 0,
+              upvotes: 0, // Would need separate voting system
+              downvotes: 0,
+              liquidity,
+              marketCap: price * (launch.totalSupply || 0),
+              decimals: launch.decimals || 9,
+              dexProvider: launch.dexProvider === 1 ? 'raydium' : 'cook'
+            };
+          } catch (error) {
+            console.error('Error processing launch token:', error);
+            return null;
+          }
+        })
+      );
+      
+      const filteredTokens = tokens.filter((token): token is TokenInfo => token !== null);
+      
+      // Cache the results
+      tradeCache.setTokens(filteredTokens);
+      
+      return filteredTokens;
+    } catch (error) {
+      console.error('Error fetching available tokens:', error);
+      // Return cached data if available
+      const cached = tradeCache.getTokens();
+      if (cached) {
+        console.log('⚠️ Error fetching tokens, using cached data');
+        return cached;
+      }
+      return [];
+    }
+  }
+
+  /**
+   * Get user balances for all tokens (with caching)
+   */
+  async getUserBalances(userPublicKey: PublicKey, forceRefresh: boolean = false): Promise<{ [key: string]: number }> {
+    // Import tradeCache once at the top
+    const { tradeCache } = await import('./tradeCache');
+    
+    try {
+      const userKey = userPublicKey.toBase58();
+      
+      // Check cache first
+      if (!forceRefresh) {
+        const cached = tradeCache.getBalance(userKey);
+        if (cached) {
+          console.log('📦 Using cached balance data');
+          return cached;
+        }
+      }
+      
+      const balances: { [key: string]: number } = {};
+      
+      // Get SOL balance (store as both 'sol' and 'SOL' for compatibility)
+      const solBalance = await this.connection.getBalance(userPublicKey);
+      const solBalanceSOL = solBalance / LAMPORTS_PER_SOL;
+      balances['sol'] = solBalanceSOL;
+      balances['SOL'] = solBalanceSOL; // Also store uppercase for display
+      
+      // Get token balances
+      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+        userPublicKey,
+        { programId: TOKEN_PROGRAM_ID },
+        'confirmed'
+      );
+      
+      for (const account of tokenAccounts.value) {
+        try {
+          if (!account.account || typeof account.account.data !== 'object' || !('parsed' in account.account.data)) {
+            continue;
+          }
+          const parsed = account.account.data.parsed as any;
+          if (!parsed.info) {
+            continue;
+          }
+          const mint = parsed.info.mint;
+          const amount = parsed.info.tokenAmount?.amount || '0';
+          const decimals = parsed.info.tokenAmount?.decimals || 9;
+          const balance = Number(amount) / Math.pow(10, decimals);
+          
+          // Get token symbol from launches
+          const { launchDataService } = await import('./launchDataService');
+          const launch = await launchDataService.getLaunchByTokenMint(mint);
+          
+          if (launch) {
+            const symbol = (launch.rawMetadata?.tokenSymbol || launch.symbol || 'TOKEN').toLowerCase();
+            balances[symbol] = balance;
+          }
+        } catch (error) {
+          // Skip invalid accounts
+          continue;
+        }
+      }
+      
+      // Cache the results
+      tradeCache.setBalance(userKey, balances);
+      
+      return balances;
+    } catch (error) {
+      console.error('Error fetching user balances:', error);
+      // Return cached data if available
+      const cached = tradeCache.getBalance(userPublicKey.toBase58());
+      if (cached) {
+        console.log('⚠️ Error fetching balances, using cached data');
+        return cached;
+      }
+      return {};
+    }
+  }
+
+  /**
+   * Get user liquidity positions
+   */
+  async getUserLiquidityPositions(userPublicKey: PublicKey): Promise<LiquidityPosition[]> {
+    try {
+      const { liquidityService } = await import('./liquidityService');
+      const positions = await liquidityService.getUserLiquidityPositions(userPublicKey);
+      
+      return positions.map(pos => ({
+        tokenSymbol: pos.tokenA,
+        tokenName: pos.tokenA,
+        lpTokens: pos.liquidity,
+        value: pos.value,
+        apy: 12.5, // Would calculate from pool data
+        feesEarned: pos.feesEarned
+      }));
+    } catch (error) {
+      console.error('Error fetching user liquidity positions:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get market making rewards
+   */
+  async getMarketMakingRewards(userPublicKey: PublicKey): Promise<MarketMakingReward[]> {
+    try {
+      // This would query your program for market making rewards
+      // For now, return empty array as rewards system needs to be implemented
+      return [];
+    } catch (error) {
+      console.error('Error fetching market making rewards:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Add liquidity to Cook DEX pool
+   */
+  async addLiquidityCookDEX(
+    tokenMint: PublicKey,
+    solAmount: number,
+    tokenAmount: number,
+    userPublicKey: PublicKey,
+    signTransaction: (transaction: Transaction) => Promise<Transaction>
+  ): Promise<{
+    success: boolean;
+    signature?: string;
+    error?: string;
+  }> {
+    try {
+      const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+      const { realLaunchService } = await import('./realLaunchService');
+      
+      // Build transaction
+      const transaction = await realLaunchService.buildAddLiquidityTransaction(
+        tokenMint,
+        WSOL_MINT,
+        tokenAmount,
+        solAmount,
+        userPublicKey
+      );
+      
+      // Get fresh blockhash
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = userPublicKey;
+      
+      // Sign and send
+      const signedTransaction = await signTransaction(transaction);
+      const signature = await this.connection.sendRawTransaction(signedTransaction.serialize());
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      
+      return {
+        success: true,
+        signature
+      };
+    } catch (error) {
+      console.error('Error adding liquidity to Cook DEX:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to add liquidity'
+      };
+    }
+  }
+
+  /**
+   * Build CreateRaydium instruction for atomic pool creation
+   * This is called when graduation threshold (30 SOL) will be met
+   */
+  private async buildCreateRaydiumInstruction(
+    user: PublicKey,
+    tokenMint: PublicKey,
+    ammAccount: PublicKey,
+    totalSupply: number
+  ): Promise<TransactionInstruction | null> {
+    try {
+      const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+      const RAYDIUM_AMM_V4 = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+      
+      // Get AMM account balance to calculate liquidity amounts
+      const ammAccountInfo = await this.connection.getAccountInfo(ammAccount);
+      const solInAmm = ammAccountInfo?.lamports || 0;
+      
+      // Use 50% of SOL in AMM for liquidity (as per graduation logic)
+      const liquiditySolAmount = Math.floor(solInAmm / 2);
+      const liquidityTokenAmount = Math.floor((totalSupply * 1e9) / 2); // 50% of total supply
+      
+      console.log('💰 Creating Raydium pool with:', {
+        solAmount: liquiditySolAmount / 1e9,
+        tokenAmount: liquidityTokenAmount / 1e9,
+        totalSupply: totalSupply
+      });
+      
+      // Derive Raydium pool PDA (pool_state)
+      // Raydium uses: [b"amm_associated_seed", base_mint, quote_mint]
+      const baseFirst = tokenMint.toBase58() < WSOL_MINT.toBase58();
+      const [baseMint, quoteMint] = baseFirst 
+        ? [tokenMint, WSOL_MINT]
+        : [WSOL_MINT, tokenMint];
+      
+      const [poolState] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('amm_associated_seed'),
+          baseMint.toBuffer(),
+          quoteMint.toBuffer(),
+        ],
+        RAYDIUM_AMM_V4
+      );
+      
+      // Try to get pool info to extract other accounts
+      // If pool doesn't exist yet, we'll need to create it first
+      // For now, we'll use placeholder accounts that the backend can handle
+      // The backend CreateRaydium instruction will handle the actual pool creation via CPI
+      
+      // Note: For a new pool, these accounts need to be created/derived by Raydium
+      // The backend's CreateRaydium instruction handles this via CPI to Raydium
+      // We just need to pass the pool_state PDA and mints
+      
+      // For now, use pool_state as placeholder for other accounts
+      // The backend will derive/create them via Raydium CPI
+      const poolAuthority = poolState; // Placeholder - backend will derive
+      const poolTokenVaultA = poolState; // Placeholder - backend will derive
+      const poolTokenVaultB = poolState; // Placeholder - backend will derive
+      const lpMint = poolState; // Placeholder - backend will derive
+      
+      // Import LetsCookProgram
+      const { LetsCookProgram } = await import('./nativeProgram');
+      
+      // Build instruction
+      const instruction = LetsCookProgram.createRaydiumPoolInstruction(
+        {
+          amount_0: liquiditySolAmount,
+          amount_1: liquidityTokenAmount,
+        },
+        {
+          user,
+          tokenMintA: baseMint,
+          tokenMintB: quoteMint,
+          poolState,
+          poolAuthority,
+          poolTokenVaultA,
+          poolTokenVaultB,
+          lpMint,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        }
+      );
+      
+      console.log('✅ CreateRaydium instruction built successfully');
+      return instruction;
+    } catch (error) {
+      console.error('❌ Error building CreateRaydium instruction:', error);
+      return null;
+    }
+  }
+}
+
+// Export interfaces
+export interface TokenInfo {
+  symbol: string;
+  name: string;
+  mint: PublicKey;
+  price: number;
+  change24h: number;
+  volume24h: number;
+  holders: number;
+  upvotes: number;
+  downvotes: number;
+  liquidity: number;
+  marketCap: number;
+  decimals: number;
+  dexProvider: 'cook' | 'raydium';
+}
+
+export interface LiquidityPosition {
+  tokenSymbol: string;
+  tokenName: string;
+  lpTokens: number;
+  value: number;
+  apy: number;
+  feesEarned: number;
+}
+
+export interface MarketMakingReward {
+  tokenSymbol: string;
+  tokenName: string;
+  rewardAmount: number;
+  rewardToken: string;
+  launchDate: string;
+  claimed: boolean;
 }
 
 // Export a default instance

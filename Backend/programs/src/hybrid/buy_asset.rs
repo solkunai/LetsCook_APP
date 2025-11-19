@@ -6,6 +6,7 @@ use solana_program::system_instruction;
 use solana_program::{account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError, pubkey::Pubkey};
 
 use crate::accounts;
+use crate::utils::mpl_compat::convert_mpl_error;
 use crate::hybrid::{find_plugin, CollectionData, CollectionPlugin, CollectionPluginType};
 use crate::instruction::accounts::BuyNFTAccounts;
 use crate::instruction::BuyNFTArgs;
@@ -33,13 +34,16 @@ pub fn buy_asset<'a>(program_id: &Pubkey, accounts: &'a [AccountInfo<'a>], args:
     accounts::check_core_key(ctx.accounts.core_program)?;
     accounts::check_system_program_key(ctx.accounts.system_program)?;
 
-    let _transfer = TransferV1CpiBuilder::new(ctx.accounts.core_program)
-        .asset(ctx.accounts.asset)
-        .authority(Some(ctx.accounts.cook_pda))
-        .payer(ctx.accounts.user)
-        .new_owner(ctx.accounts.user)
-        .collection(Some(ctx.accounts.collection))
-        .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])?;
+    unsafe {
+        let _transfer = TransferV1CpiBuilder::new(unsafe { std::mem::transmute(ctx.accounts.core_program) })
+            .asset(unsafe { std::mem::transmute(ctx.accounts.asset) })
+            .authority(Some(unsafe { std::mem::transmute(ctx.accounts.cook_pda) }))
+            .payer(unsafe { std::mem::transmute(ctx.accounts.user) })
+            .new_owner(unsafe { std::mem::transmute(ctx.accounts.user) })
+            .collection(Some(unsafe { std::mem::transmute(ctx.accounts.collection) }))
+            .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])
+            .map_err(|e| convert_mpl_error(e))?;
+    }
 
     if **ctx.accounts.listing.try_borrow_lamports()? != 0 {
         let listing = NewListing::try_from_slice(&ctx.accounts.listing.data.borrow())?;

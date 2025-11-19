@@ -1,7 +1,9 @@
 use mpl_core::instructions::{CreateCollectionV1CpiBuilder, CreateV1CpiBuilder};
 use solana_program::{account_info::AccountInfo, entrypoint::ProgramResult, msg};
+use solana_pubkey::Pubkey as MplPubkey;
 
 use crate::accounts;
+use crate::utils::mpl_compat::convert_mpl_error;
 
 use crate::instruction;
 use crate::state;
@@ -44,16 +46,19 @@ pub fn set_attributes<'a>(
         }
     }
 
-    mpl_core::instructions::UpdatePluginV1CpiBuilder::new(core_account_info)
-        .collection(Some(collection_mint_account_info))
-        .asset(nft_mint_account_info)
-        .payer(user_account_info)
-        .authority(Some(sol_account_info))
-        .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
-            attribute_list: attribute_list,
-        }))
-        .system_program(system_program_account_info)
-        .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])?;
+    unsafe {
+        mpl_core::instructions::UpdatePluginV1CpiBuilder::new(unsafe { std::mem::transmute(core_account_info) })
+            .collection(Some(unsafe { std::mem::transmute(collection_mint_account_info) }))
+            .asset(unsafe { std::mem::transmute(nft_mint_account_info) })
+            .payer(unsafe { std::mem::transmute(user_account_info) })
+            .authority(Some(unsafe { std::mem::transmute(sol_account_info) }))
+            .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
+                attribute_list: attribute_list,
+            }))
+            .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+            .invoke_signed(&[&[&accounts::SOL_SEED.to_le_bytes(), &[pda_sol_bump_seed]]])
+            .map_err(|e| convert_mpl_error(e))?;
+    }
 
     return Ok(());
 }
@@ -73,24 +78,33 @@ pub fn mint_collection<'a>(
     collection_config: state::CollectionDetails,
     attributes: Vec<instruction::Attribute>,
 ) -> ProgramResult {
-    let _create_cpi = CreateCollectionV1CpiBuilder::new(core_program_account_info)
-        .collection(collection_account)
-        .payer(funding_account)
-        .update_authority(Some(pda_account))
-        .name(collection_config.name.to_string())
-        .uri(collection_config.uri.to_string())
-        .system_program(system_program_account_info)
-        .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[pda_bump]]])?;
+    unsafe {
+        let _create_cpi = CreateCollectionV1CpiBuilder::new(unsafe { std::mem::transmute(core_program_account_info) })
+            .collection(unsafe { std::mem::transmute(collection_account) })
+            .payer(unsafe { std::mem::transmute(funding_account) })
+            .update_authority(Some(unsafe { std::mem::transmute(pda_account) }))
+            .name(collection_config.name.to_string())
+            .uri(collection_config.uri.to_string())
+            .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+            .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[pda_bump]]])
+            .map_err(|e| convert_mpl_error(e))?; // Convert error type
+    }
 
-    mpl_core::instructions::AddCollectionPluginV1CpiBuilder::new(core_program_account_info)
-        .collection(collection_account)
-        .payer(funding_account)
-        .authority(Some(pda_account))
-        .plugin(mpl_core::types::Plugin::UpdateDelegate(mpl_core::types::UpdateDelegate {
-            additional_delegates: vec![*team_account_info.key],
-        }))
-        .system_program(system_program_account_info)
-        .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[pda_bump]]])?;
+    unsafe {
+        mpl_core::instructions::AddCollectionPluginV1CpiBuilder::new(unsafe { std::mem::transmute(core_program_account_info) })
+            .collection(unsafe { std::mem::transmute(collection_account) })
+            .payer(unsafe { std::mem::transmute(funding_account) })
+            .authority(Some(unsafe { std::mem::transmute(pda_account) }))
+            .plugin(mpl_core::types::Plugin::UpdateDelegate(mpl_core::types::UpdateDelegate {
+                additional_delegates: vec![unsafe {
+                    // Convert Pubkey from solana_program to solana_pubkey
+                    std::mem::transmute::<solana_program::pubkey::Pubkey, MplPubkey>(*team_account_info.key)
+                }],
+            }))
+            .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+            .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[pda_bump]]])
+            .map_err(|e| convert_mpl_error(e))?; // Convert error type
+    }
 
     if attributes.len() > 0 {
         let mut attribute_list: Vec<mpl_core::types::Attribute> = Vec::new();
@@ -99,33 +113,36 @@ pub fn mint_collection<'a>(
             name.push_str(&i.to_string().to_owned());
             attribute_list.push(mpl_core::types::Attribute {
                 key: name,
-                value: attributes[i].name.to_string(),
+                value: attributes[i].trait_type.to_string(),
             });
 
             name = "Min_".to_string().to_owned();
             name.push_str(&i.to_string().to_owned());
             attribute_list.push(mpl_core::types::Attribute {
                 key: name,
-                value: attributes[i].min.to_string(),
+                value: attributes[i].min.clone(),
             });
 
             name = "Max_".to_string().to_owned();
             name.push_str(&i.to_string().to_owned());
             attribute_list.push(mpl_core::types::Attribute {
                 key: name,
-                value: attributes[i].max.to_string(),
+                value: attributes[i].max.clone(),
             });
         }
 
-        mpl_core::instructions::AddCollectionPluginV1CpiBuilder::new(core_program_account_info)
-            .collection(collection_account)
-            .payer(funding_account)
-            .authority(Some(pda_account))
-            .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
-                attribute_list: attribute_list,
-            }))
-            .system_program(system_program_account_info)
-            .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[pda_bump]]])?;
+        unsafe {
+            mpl_core::instructions::AddCollectionPluginV1CpiBuilder::new(unsafe { std::mem::transmute(core_program_account_info) })
+                .collection(unsafe { std::mem::transmute(collection_account) })
+                .payer(unsafe { std::mem::transmute(funding_account) })
+                .authority(Some(unsafe { std::mem::transmute(pda_account) }))
+                .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
+                    attribute_list: attribute_list,
+                }))
+                .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+                .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[pda_bump]]])
+                .map_err(|e| convert_mpl_error(e))?; // Convert error type
+        }
     }
     Ok(())
 }
@@ -147,40 +164,45 @@ pub fn mint_collection_nft<'a>(
     collection_config: state::CollectionDetails,
 ) -> ProgramResult {
     msg!("create collection asset");
-    let _create_cpi = CreateV1CpiBuilder::new(core_program_account_info)
-        .authority(Some(pda_account))
-        .asset(nft_mint_account)
-        .collection(Some(collection_mint_account))
-        .payer(funding_account)
-        .owner(Some(pda_account))
-        .data_state(mpl_core::types::DataState::AccountState)
-        .name(collection_config.name)
-        .uri(collection_config.uri)
-        .system_program(system_program_account_info)
-        .invoke_signed(&[
-            &[
-                &collection_mint_account.key.to_bytes(),
-                &collection_config.index.to_le_bytes(),
-                b"Asset",
-                &[pda_bump],
-            ],
-            &[&collection_config.pda.to_le_bytes(), &[cook_pda_bump]],
-        ])?;
+    unsafe {
+        let _create_cpi = CreateV1CpiBuilder::new(unsafe { std::mem::transmute(core_program_account_info) })
+            .authority(Some(unsafe { std::mem::transmute(pda_account) }))
+            .asset(unsafe { std::mem::transmute(nft_mint_account) })
+            .collection(Some(unsafe { std::mem::transmute(collection_mint_account) }))
+            .payer(unsafe { std::mem::transmute(funding_account) })
+            .owner(Some(unsafe { std::mem::transmute(pda_account) }))
+            .data_state(mpl_core::types::DataState::AccountState)
+            .name(collection_config.name)
+            .uri(collection_config.uri)
+            .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+            .invoke_signed(&[
+                &[
+                    &collection_mint_account.key.to_bytes(),
+                    &collection_config.index.to_le_bytes(),
+                    b"Asset",
+                    &[pda_bump],
+                ],
+                &[&collection_config.pda.to_le_bytes(), &[cook_pda_bump]],
+            ])
+            .map_err(|e| convert_mpl_error(e))?; // Convert error type
+    }
 
-    mpl_core::instructions::AddPluginV1CpiBuilder::new(core_program_account_info)
-        .asset(nft_mint_account)
-        .collection(Some(collection_mint_account))
-        .payer(funding_account)
-        .authority(Some(pda_account))
-        .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
-            attribute_list: vec![mpl_core::types::Attribute {
-                key: "CookWrapIndex".to_string(),
-                value: collection_config.index.to_string(),
-            }],
-        }))
-        .system_program(system_program_account_info)
-        .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[cook_pda_bump]]])
-        .unwrap();
+    unsafe {
+        mpl_core::instructions::AddPluginV1CpiBuilder::new(unsafe { std::mem::transmute(core_program_account_info) })
+            .asset(unsafe { std::mem::transmute(nft_mint_account) })
+            .collection(Some(unsafe { std::mem::transmute(collection_mint_account) }))
+            .payer(unsafe { std::mem::transmute(funding_account) })
+            .authority(Some(unsafe { std::mem::transmute(pda_account) }))
+            .plugin(mpl_core::types::Plugin::Attributes(mpl_core::types::Attributes {
+                attribute_list: vec![mpl_core::types::Attribute {
+                    key: "CookWrapIndex".to_string(),
+                    value: collection_config.index.to_string(),
+                }],
+            }))
+            .system_program(unsafe { std::mem::transmute(system_program_account_info) })
+            .invoke_signed(&[&[&collection_config.pda.to_le_bytes(), &[cook_pda_bump]]])
+            .map_err(|e| convert_mpl_error(e))?; // Convert error type
+    }
 
     Ok(())
 }

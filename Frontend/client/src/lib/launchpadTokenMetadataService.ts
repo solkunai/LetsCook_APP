@@ -12,7 +12,7 @@ export class LaunchpadTokenMetadataService {
   
   /**
    * Create comprehensive token metadata for launchpad tokens
-   * This replaces the old MetaplexMetadataService.createTokenMetadata method
+   * Uses Token-2022's built-in metadata interface (no Metaplex required)
    */
   static async createTokenMetadata(
     connection: Connection,

@@ -141,7 +141,7 @@ export class MarketMakingRewardsService {
     try {
       // Fetch real trading volume from blockchain
       const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
       
       // Get user's trading accounts
       const accounts = await connection.getProgramAccounts(programId, {
@@ -202,7 +202,7 @@ export class MarketMakingRewardsService {
     try {
       // Fetch real market making config from blockchain
       const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
       
       // Get raffle account
       const raffleAccount = await connection.getAccountInfo(new PublicKey(raffleId));
@@ -278,7 +278,7 @@ export class MarketMakingRewardsService {
     try {
       // Fetch real market makers from blockchain
       const connection = getSimpleConnection();
-      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "ygnLL5qWn11qkxtjLXBrP61oapijCrygpmpq3k2LkEJ");
+      const programId = new PublicKey(import.meta.env.VITE_MAIN_PROGRAM_ID || "J3Qr5TAMocTrPXrJbjH86jLQ3bCXJaS4hFgaE54zT2jg");
       
       // Get all market maker accounts
       const accounts = await connection.getProgramAccounts(programId, {

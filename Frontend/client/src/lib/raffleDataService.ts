@@ -238,10 +238,10 @@ export class RaffleDataService {
         image: launchData.image || '',
         banner: launchData.image || '', // Use same image for banner if no separate banner
         ticketPrice: launchData.ticketPrice || 0.1, // Use ticketPrice from LaunchData
-        maxTickets: launchData.maxTickets || 1000,
+        maxTickets: launchData.maxTickets || launchData.numMints || 0,
         soldTickets: 0, // Will be updated from blockchain state
         raffleDuration: durationHours, // Hours
-        winnerCount: launchData.maxTickets || 1000, // For now, same as max tickets
+        winnerCount: launchData.winnerCount || launchData.mintsWon || 0,
         startTime: launchTime,
         endTime: endTime,
         status: launchData.status === 'live' ? 'active' : launchData.status === 'ended' ? 'ended' : 'upcoming',

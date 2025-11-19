@@ -1,7 +1,6 @@
-import { Connection, clusterApiUrl } from '@solana/web3.js';
+import { getConnection } from './connection';
 
-// Simple connection using standard Solana RPC to avoid CORS issues
+// Simple connection using environment variable
 export const getSimpleConnection = () => {
-  // Use standard Solana devnet RPC to avoid CORS issues
-  return new Connection(clusterApiUrl('devnet'), 'confirmed');
+  return getConnection('confirmed');
 };

@@ -4,10 +4,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { ChefHat, Wallet, UserPlus, Shield, Target, Zap, Gift, ArrowRight } from "lucide-react";
+import { ChefHat, Wallet, UserPlus, Shield, Target, Zap, Gift, ArrowRight, Link as LinkIcon } from "lucide-react";
+import { useWallet } from '@solana/wallet-adapter-react';
+import { referralService } from '@/lib/referralService';
 
 interface OnboardingFlowProps {
-  onComplete: (data: { username: string; walletConnected: boolean; referralOptIn: boolean }) => void;
+  onComplete: (data: { username: string; walletConnected: boolean; referralOptIn: boolean; referralLink?: string }) => void;
 }
 
 export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
@@ -15,12 +17,31 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const [username, setUsername] = useState("");
   const [walletConnected, setWalletConnected] = useState(false);
   const [referralOptIn, setReferralOptIn] = useState(true);
+  const [referrerCode, setReferrerCode] = useState("");
+  const { publicKey } = useWallet();
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step < 5) {
       setStep(step + 1);
-    } else {
-      onComplete({ username, walletConnected, referralOptIn });
+      return;
+    }
+    let referralLink: string | undefined = undefined;
+    try {
+      if (publicKey && referralOptIn) {
+        const code = await referralService.generateReferralCode(publicKey);
+        const baseUrl = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+        referralLink = `${baseUrl}?ref=${code}`;
+        if (username.trim()) {
+          await referralService.setUsername(publicKey, username.trim());
+        }
+        if (referrerCode.trim()) {
+          await referralService.trackReferralUsage(referrerCode.trim().toUpperCase(), publicKey);
+        }
+      }
+    } catch (e) {
+      console.error('Onboarding referral setup failed:', e);
+    } finally {
+      onComplete({ username, walletConnected, referralOptIn, referralLink });
     }
   };
 
@@ -207,6 +228,16 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Enter your username"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="referrer" className="text-sm font-medium text-foreground">Who referred you? (Optional)</Label>
+                <Input
+                  id="referrer"
+                  value={referrerCode}
+                  onChange={(e) => setReferrerCode(e.target.value.toUpperCase())}
+                  placeholder="Enter referral code e.g. CHEFABCD1234"
                   className="mt-1"
                 />
               </div>
