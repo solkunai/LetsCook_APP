@@ -4,7 +4,7 @@ services:
     env: node
     region: oregon
     plan: starter
-    buildCommand: cd Frontend && NODE_ENV=development npm install && npm run build
+    buildCommand: cd Frontend && chmod +x build.sh && bash build.sh
     startCommand: cd Frontend && npm start
     envVars:
       - key: NODE_ENV
