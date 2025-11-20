@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { fileURLToPath } from "url";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import { nodePolyfills } from "@esbuild-plugins/node-modules-polyfill";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -31,10 +32,21 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       include: ["buffer", "process", "@solana/web3.js"],
+      esbuildOptions: {
+        plugins: [
+          nodePolyfills({
+            buffer: true,
+            process: true,
+          }),
+        ],
+      },
     },
     build: {
       outDir: path.resolve(__dirname, "dist/public"),
       emptyOutDir: true,
+      commonjsOptions: {
+        transformMixedEsModules: true,
+      },
       rollupOptions: {
         output: {
           manualChunks: undefined,

@@ -12,6 +12,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Buffer polyfill - must be loaded before any modules -->
+    <script>
+      // Set up global before any modules load
+      if (typeof global === 'undefined') {
+        window.global = window;
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
