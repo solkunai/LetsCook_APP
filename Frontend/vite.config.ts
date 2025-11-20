@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { fileURLToPath } from "url";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import { bufferPolyfillPlugin } from "./vite-plugin-buffer-polyfill";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,6 +15,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       runtimeErrorOverlay(),
+      bufferPolyfillPlugin(),
     ],
     resolve: {
       alias: {
