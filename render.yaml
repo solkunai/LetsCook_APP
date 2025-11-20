@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: lets-cook-frontend
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: cd Frontend && npm install && npm run build
+    startCommand: cd Frontend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      # Solana Configuration
+      # - key: SOLANA_NETWORK
+      #   value: mainnet-beta  # or devnet
+      # Pinata IPFS Configuration (for metadata storage)
+      # - key: PINATA_JWT
+      #   sync: false  # Set in Render dashboard
+      # - key: PINATA_API_KEY
+      #   sync: false  # Set in Render dashboard
+      # - key: PINATA_SECRET_KEY
+      #   sync: false  # Set in Render dashboard
+      # Supabase Configuration
+      # - key: SUPABASE_URL
+      #   sync: false  # Set in Render dashboard
+      # - key: SUPABASE_SERVICE_ROLE_KEY
+      #   sync: false  # Set in Render dashboard
+
