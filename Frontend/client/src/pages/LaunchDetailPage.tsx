@@ -595,8 +595,9 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
     const priceUSD = price * solPriceUSD;
     let priceStr = '';
     
+    // Cap at 9 decimals maximum for USD display
     if (priceUSD < 0.000001) {
-      priceStr = `$${priceUSD.toFixed(12)}`;
+      priceStr = `$${priceUSD.toFixed(9)}`;
     } else if (priceUSD < 0.01) {
       priceStr = `$${priceUSD.toFixed(8)}`;
     } else if (priceUSD < 1000) {
@@ -608,8 +609,9 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
     }
     
     if (showUSD) {
+      // Cap SOL display at 9 decimals maximum (consistent with bondingCurveService)
       if (price < 0.000001) {
-        return `${priceStr} (${price.toFixed(12)} SOL)`;
+        return `${priceStr} (${price.toFixed(9)} SOL)`;
       } else if (price < 0.01) {
         return `${priceStr} (${price.toFixed(8)} SOL)`;
       } else {

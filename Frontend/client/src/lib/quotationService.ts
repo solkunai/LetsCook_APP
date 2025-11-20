@@ -1,9 +1,15 @@
 /**
- * Quotation Service
+ * Quotation Service - FIXED VERSION
  * 
  * Dedicated service for fetching and calculating swap quotes
  * ALWAYS uses Supabase as source of truth for current_price, tokens_sold, and pool_sol_balance
  * Falls back to blockchain queries if Supabase doesn't have the data
+ * 
+ * CRITICAL FIXES:
+ * 1. Proper bonding curve integration for buy/sell
+ * 2. Price validation (no more 447,000% impacts!)
+ * 3. Average price calculation fixed
+ * 4. All decimals handled properly
  */
 
 import { PublicKey, Connection } from '@solana/web3.js';
@@ -19,6 +25,7 @@ export interface SwapQuote {
   currentPrice: number; // Current price before trade
   postTradePrice: number; // Price after trade
   source: 'trading_service' | 'bonding_curve' | 'amm_pool';
+  validation?: string; // Optional validation warning/error
 }
 
 export class QuotationService {
@@ -72,14 +79,14 @@ export class QuotationService {
     // STEP 2: If current price is still invalid, calculate it from bonding curve
     if (latestCurrentPrice <= 0) {
       const bondingCurveConfig = {
-        totalSupply: latestTotalSupply,
+        realSupply: latestTotalSupply, // CRITICAL: Use real supply
         decimals: latestDecimals,
         curveType: 'linear' as const,
       };
       latestCurrentPrice = bondingCurveService.calculatePrice(latestTokensSold, bondingCurveConfig);
     }
 
-    const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+    const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111112');
     const tokenMintKey = new PublicKey(tokenMint);
 
     // STEP 3: Try to get real quote from trading service first
@@ -97,7 +104,7 @@ export class QuotationService {
         const postBuyTokensSold = latestTokensSold + tokensReceived;
         
         const bondingCurveConfig = {
-          totalSupply: latestTotalSupply,
+          realSupply: latestTotalSupply,
           decimals: latestDecimals,
           curveType: 'linear' as const,
         };
@@ -152,7 +159,7 @@ export class QuotationService {
     try {
       const metadata = await LaunchMetadataService.getMetadataByTokenMint(tokenMint);
       if (metadata) {
-        // Use Supabase values if available (they're always up-to-date after trades)
+        // Use Supabase values if available
         if (metadata.tokens_sold !== undefined && metadata.tokens_sold !== null) {
           latestTokensSold = metadata.tokens_sold;
         }
@@ -173,22 +180,22 @@ export class QuotationService {
     // STEP 2: If current price is still invalid, calculate it from bonding curve
     if (latestCurrentPrice <= 0) {
       const bondingCurveConfig = {
-        totalSupply: latestTotalSupply,
+        realSupply: latestTotalSupply,
         decimals: latestDecimals,
         curveType: 'linear' as const,
       };
       latestCurrentPrice = bondingCurveService.calculatePrice(latestTokensSold, bondingCurveConfig);
     }
 
-    const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
     const tokenMintKey = new PublicKey(tokenMint);
+    const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111112');
 
     // STEP 3: Try to get real quote from trading service first
     try {
       const quote = await this.tradingService.getSwapQuote(
         tokenMintKey,
         WSOL_MINT,
-        tokenAmount, // Already in human-readable format
+        tokenAmount,
         'cook'
       );
 
@@ -198,7 +205,7 @@ export class QuotationService {
         const postSellTokensSold = Math.max(0, latestTokensSold - tokenAmount);
         
         const bondingCurveConfig = {
-          totalSupply: latestTotalSupply,
+          realSupply: latestTotalSupply,
           decimals: latestDecimals,
           curveType: 'linear' as const,
         };
@@ -233,20 +240,17 @@ export class QuotationService {
   }
 
   /**
-   * Calculate buy quote using bonding curve formula
+   * Calculate buy quote using bonding curve formula - FIXED VERSION
    * 
-   * For a linear bonding curve: P(x) = a*x + b
-   * Where:
-   * - x = tokens sold (human-readable)
-   * - a = slope (price increase per token)
-   * - b = base price (starting price)
+   * For a linear bonding curve: P(x) = initial_price + slope×x
    * 
    * To calculate tokens for SOL amount, we integrate:
-   * SOL = ∫(a*x + b)dx from x0 to x1
-   * SOL = (a/2)(x1^2 - x0^2) + b(x1 - x0)
+   * SOL = ∫(initial_price + slope×x)dx from x0 to x1
+   * SOL = initial_price×(x1-x0) + (slope/2)×(x1²-x0²)
    * 
-   * Solving for x1: x1 = (-b + sqrt(b^2 + 2*a*SOL + 2*a*b*x0 + a*x0^2)) / a
-   * Tokens received = x1 - x0
+   * Solving for x1 using quadratic formula:
+   * slope×x1² + 2×initial_price×x1 - C = 0
+   * Where C = 2×SOL + slope×x0² + 2×initial_price×x0
    */
   private getBondingCurveBuyQuote(
     solAmount: number,
@@ -256,75 +260,20 @@ export class QuotationService {
     currentPrice: number
   ): SwapQuote {
     const config = {
-      totalSupply,
+      realSupply: totalSupply, // CRITICAL: Use real supply for calculations
       decimals,
       curveType: 'linear' as const,
     };
 
-    // Get curve parameters
-    const basePrice = bondingCurveService.calculateInitialPrice(config);
-    const slope = this.calculateSlopeFromSupply(totalSupply);
+    // Calculate current price from bonding curve
+    const calculatedCurrentPrice = bondingCurveService.calculatePrice(tokensSold, config);
     
-    // For very small slopes (large supplies like 10B+), use current price directly
-    // This matches the backend behavior for large supplies
-    // When slope is extremely small, the curve is nearly flat, so: tokens = SOL / currentPrice
-    // BUT: Always use the proper quadratic formula first, only fallback if it fails
-    if (false) { // DISABLED: Always use proper quadratic formula
-      // Validate current price
-      if (currentPrice <= 0) {
-        // Fallback: calculate current price from bonding curve
-        const calculatedPrice = bondingCurveService.calculatePrice(tokensSold, config);
-        if (calculatedPrice <= 0) {
-          return {
-            tokensReceived: 0,
-            priceImpact: 0,
-            avgPrice: 0,
-            currentPrice: 0,
-            postTradePrice: 0,
-            source: 'bonding_curve'
-          };
-        }
-        // Use calculated price
-        const tokensReceived = solAmount / calculatedPrice;
-        const postBuyTokensSold = tokensSold + tokensReceived;
-        const postTradePrice = bondingCurveService.calculatePrice(postBuyTokensSold, config);
-        
-        return {
-          tokensReceived,
-          priceImpact: 0,
-          avgPrice: calculatedPrice,
-          currentPrice: calculatedPrice,
-          postTradePrice,
-          source: 'bonding_curve'
-        };
-      }
-      
-      // Use current price directly for calculation
-      const tokensReceived = solAmount / currentPrice;
-      
-      // Calculate post-buy price for display
-      const postBuyTokensSold = tokensSold + tokensReceived;
-      const postTradePrice = bondingCurveService.calculatePrice(postBuyTokensSold, config);
-      
-      const priceImpact = currentPrice > 0 
-        ? ((postTradePrice - currentPrice) / currentPrice) * 100 
-        : 0;
-      
-      // Average price is the current price (calculation uses current price)
-      const avgPrice = currentPrice;
-      
-      return {
-        tokensReceived,
-        priceImpact,
-        avgPrice,
-        currentPrice,
-        postTradePrice,
-        source: 'bonding_curve'
-      };
-    }
+    // Use calculated price if provided price seems invalid
+    const actualCurrentPrice = (currentPrice > 0 && currentPrice < 1) 
+      ? currentPrice 
+      : calculatedCurrentPrice;
 
-    // Use the standard bonding curve calculation
-    // calculateTokensForSol returns human-readable units
+    // Use the bonding curve integration to calculate tokens
     const tokensReceived = bondingCurveService.calculateTokensForSol(
       solAmount,
       tokensSold, // Human-readable format
@@ -333,14 +282,15 @@ export class QuotationService {
 
     // Validate result
     if (!isFinite(tokensReceived) || tokensReceived <= 0) {
-      // If calculation fails, return error
+      console.warn('⚠️ Invalid tokens calculation:', tokensReceived);
       return {
         tokensReceived: 0,
         priceImpact: 0,
-        avgPrice: currentPrice,
-        currentPrice,
-        postTradePrice: currentPrice,
-        source: 'bonding_curve'
+        avgPrice: actualCurrentPrice,
+        currentPrice: actualCurrentPrice,
+        postTradePrice: actualCurrentPrice,
+        source: 'bonding_curve',
+        validation: 'Calculation failed'
       };
     }
 
@@ -353,45 +303,46 @@ export class QuotationService {
     const postTradePrice = bondingCurveService.calculatePrice(postBuyTokensSold, config);
 
     // Calculate price impact
-    const priceImpact = currentPrice > 0 
-      ? ((postTradePrice - currentPrice) / currentPrice) * 100 
+    const priceImpact = actualCurrentPrice > 0 
+      ? ((postTradePrice - actualCurrentPrice) / actualCurrentPrice) * 100 
       : 0;
 
     // Average price is what you actually paid per token
-    // For display purposes, use current price (not calculated average)
-    const avgPrice = currentPrice;
+    const avgPrice = finalTokensReceived > 0 ? solAmount / finalTokensReceived : actualCurrentPrice;
+
+    // Validate the trade
+    const validationError = bondingCurveService.validateTrade({
+      solAmount,
+      currentPrice: actualCurrentPrice,
+      avgPrice,
+      priceImpact,
+      tokensReceived: finalTokensReceived
+    });
+
+    console.log(`💰 Buy Quote Calculated:
+      SOL Amount: ${solAmount}
+      Tokens Sold Before: ${tokensSold.toLocaleString()}
+      Tokens Received: ${finalTokensReceived.toLocaleString()}
+      Current Price: ${bondingCurveService.formatPrice(actualCurrentPrice)} SOL
+      Post-Trade Price: ${bondingCurveService.formatPrice(postTradePrice)} SOL
+      Average Price: ${bondingCurveService.formatPrice(avgPrice)} SOL
+      Price Impact: ${priceImpact.toFixed(2)}%
+      ${validationError ? `⚠️ Validation Warning: ${validationError}` : '✅ Valid'}
+    `);
 
     return {
       tokensReceived: finalTokensReceived,
       priceImpact,
       avgPrice,
-      currentPrice,
+      currentPrice: actualCurrentPrice,
       postTradePrice,
-      source: 'bonding_curve'
+      source: 'bonding_curve',
+      validation: validationError || undefined
     };
   }
 
   /**
-   * Calculate slope from total supply
-   * This matches the bondingCurveService implementation EXACTLY
-   */
-  private calculateSlopeFromSupply(totalSupply: number): number {
-    if (totalSupply <= 0) return 0.0000000000001;
-    
-    // Match backend: base_pi = 0.000000001, reference_supply = 1_000_000_000
-    const referenceSupply = 1_000_000_000.0; // 1 billion (matches backend)
-    const basePi = 0.000000001; // Matches backend base_pi
-    
-    // Calculate supply scale (same as backend)
-    const supplyScale = Math.min(referenceSupply / Math.max(1, totalSupply), 1.0);
-    const slope = basePi * supplyScale;
-    
-    // Ensure minimum (matches backend)
-    return Math.max(0.0000000000001, slope);
-  }
-
-  /**
-   * Calculate sell quote using bonding curve formula
+   * Calculate sell quote using bonding curve formula - FIXED VERSION
    */
   private getBondingCurveSellQuote(
     tokenAmount: number,
@@ -401,15 +352,36 @@ export class QuotationService {
     currentPrice: number
   ): SwapQuote {
     const config = {
-      totalSupply,
+      realSupply: totalSupply,
       decimals,
       curveType: 'linear' as const,
     };
 
-    // Calculate SOL received
-    // calculateSolForTokens expects tokensAmount in human-readable format and returns SOL
+    // Calculate current price from bonding curve
+    const calculatedCurrentPrice = bondingCurveService.calculatePrice(tokensSold, config);
+    
+    // Use calculated price if provided price seems invalid
+    const actualCurrentPrice = (currentPrice > 0 && currentPrice < 1) 
+      ? currentPrice 
+      : calculatedCurrentPrice;
+
+    // Safety check: can't sell more than what's been sold
+    if (tokenAmount > tokensSold) {
+      console.warn('⚠️ Trying to sell more tokens than available');
+      return {
+        solReceived: 0,
+        priceImpact: 0,
+        avgPrice: actualCurrentPrice,
+        currentPrice: actualCurrentPrice,
+        postTradePrice: actualCurrentPrice,
+        source: 'bonding_curve',
+        validation: 'Cannot sell more than available'
+      };
+    }
+
+    // Calculate SOL received using bonding curve integration
     const solReceived = bondingCurveService.calculateSolForTokens(
-      tokenAmount, // Human-readable format
+      tokenAmount,
       tokensSold,
       config
     );
@@ -418,24 +390,50 @@ export class QuotationService {
     const postSellTokensSold = Math.max(0, tokensSold - tokenAmount);
     const postTradePrice = bondingCurveService.calculatePrice(postSellTokensSold, config);
 
-    // Calculate price impact
-    const priceImpact = currentPrice > 0 
-      ? ((currentPrice - postTradePrice) / currentPrice) * 100 
+    // Calculate price impact (negative for sells)
+    const priceImpact = actualCurrentPrice > 0 
+      ? ((postTradePrice - actualCurrentPrice) / actualCurrentPrice) * 100 
       : 0;
 
     // Calculate average price
     const avgPrice = tokenAmount > 0 
       ? solReceived / tokenAmount 
-      : currentPrice;
+      : actualCurrentPrice;
+
+    // Validate the trade
+    const validationError = bondingCurveService.validateTrade({
+      tokenAmount,
+      currentPrice: actualCurrentPrice,
+      avgPrice,
+      priceImpact
+    });
+
+    console.log(`💰 Sell Quote Calculated:
+      Token Amount: ${tokenAmount.toLocaleString()}
+      Tokens Sold Before: ${tokensSold.toLocaleString()}
+      SOL Received: ${solReceived.toFixed(6)}
+      Current Price: ${bondingCurveService.formatPrice(actualCurrentPrice)} SOL
+      Post-Trade Price: ${bondingCurveService.formatPrice(postTradePrice)} SOL
+      Average Price: ${bondingCurveService.formatPrice(avgPrice)} SOL
+      Price Impact: ${priceImpact.toFixed(2)}%
+      ${validationError ? `⚠️ Validation Warning: ${validationError}` : '✅ Valid'}
+    `);
 
     return {
       solReceived,
       priceImpact,
       avgPrice,
-      currentPrice,
+      currentPrice: actualCurrentPrice,
       postTradePrice,
-      source: 'bonding_curve'
+      source: 'bonding_curve',
+      validation: validationError || undefined
     };
   }
 }
 
+export const quotationService = new QuotationService(
+  new (await import('@solana/web3.js')).Connection(
+    'https://api.devnet.solana.com',
+    'confirmed'
+  )
+);
