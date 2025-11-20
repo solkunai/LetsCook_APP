@@ -734,30 +734,32 @@ export default function RaffleDetailPage() {
         showNavigation={true}
       />
 
-      <div className="py-8 px-4">
+      <div className="py-4 sm:py-6 md:py-8 px-3 sm:px-4 md:px-6">
         <div className="max-w-6xl mx-auto">
           {/* Back Button and Refresh */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
             <button
               onClick={() => setLocation('/raffles')}
-              className="flex items-center text-slate-400 hover:text-white transition-colors"
+              className="flex items-center text-slate-400 hover:text-white transition-colors text-sm sm:text-base min-h-[44px]"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Raffles
+              <span className="hidden sm:inline">Back to Raffles</span>
+              <span className="sm:hidden">Back</span>
             </button>
             
             <button
               onClick={fetchRaffleData}
               disabled={loading}
-              className="flex items-center text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+              className="flex items-center text-slate-400 hover:text-white transition-colors disabled:opacity-50 text-sm sm:text-base min-h-[44px]"
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh Data
+              <span className="hidden sm:inline">Refresh Data</span>
+              <span className="sm:hidden">Refresh</span>
             </button>
           </div>
 
           {/* Banner */}
-          <div className="relative mb-8 rounded-2xl overflow-hidden bg-gradient-to-r from-purple-600 via-blue-600 to-indigo-600 h-[400px]">
+          <div className="relative mb-6 sm:mb-8 rounded-xl sm:rounded-2xl overflow-hidden bg-gradient-to-r from-purple-600 via-blue-600 to-indigo-600 h-[200px] sm:h-[300px] md:h-[400px]">
             {raffleData.banner && !raffleData.banner.includes('placeholder') && !raffleData.banner.includes('data:image') ? (
               <img 
                 src={raffleData.banner} 
@@ -794,12 +796,12 @@ export default function RaffleDetailPage() {
             </div>
             
             {/* Contract Address Overlay */}
-            <div className="absolute top-6 right-6">
-              <div className="bg-black/30 backdrop-blur-md rounded-xl p-4 border border-white/10">
-                <div className="text-white text-sm font-medium mb-2">Contract Address</div>
-                <div className="flex items-center space-x-3">
-                  <code className="text-xs text-gray-200 font-mono bg-black/40 px-3 py-2 rounded-lg">
-                    {raffleData.baseTokenMint.slice(0, 8)}...{raffleData.baseTokenMint.slice(-8)}
+            <div className="absolute top-3 sm:top-6 right-3 sm:right-6">
+              <div className="bg-black/30 backdrop-blur-md rounded-lg sm:rounded-xl p-2 sm:p-4 border border-white/10">
+                <div className="text-white text-xs sm:text-sm font-medium mb-1 sm:mb-2">Contract</div>
+                <div className="flex items-center space-x-2 sm:space-x-3">
+                  <code className="text-[10px] sm:text-xs text-gray-200 font-mono bg-black/40 px-2 sm:px-3 py-1 sm:py-2 rounded">
+                    {raffleData.baseTokenMint.slice(0, 6)}...{raffleData.baseTokenMint.slice(-6)}
                   </code>
                   <button
                     onClick={() => {
@@ -809,35 +811,35 @@ export default function RaffleDetailPage() {
                         description: "Contract address copied to clipboard",
                       });
                     }}
-                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 hover:bg-white/20 rounded transition-colors min-h-[32px] min-w-[32px]"
                     title="Copy contract address"
                   >
-                    <Copy className="w-4 h-4 text-white" />
+                    <Copy className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
                   </button>
                 </div>
               </div>
             </div>
             
             {/* Token Name Overlay */}
-            <div className="absolute bottom-6 right-6">
-              <div className="text-right">
-                <h1 className="text-4xl font-bold text-white mb-2 drop-shadow-lg">{raffleData.name}</h1>
-                <p className="text-xl text-purple-200 font-semibold drop-shadow-lg">{raffleData.symbol}</p>
+            <div className="absolute bottom-3 sm:bottom-6 right-3 sm:right-6 left-3 sm:left-auto">
+              <div className="text-right sm:text-right">
+                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white mb-1 sm:mb-2 drop-shadow-lg break-words">{raffleData.name}</h1>
+                <p className="text-sm sm:text-base md:text-lg lg:text-xl text-purple-200 font-semibold drop-shadow-lg">{raffleData.symbol}</p>
               </div>
             </div>
           </div>
 
-          <div className="grid lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8">
             {/* Main Content */}
-            <div className="lg:col-span-2 space-y-6">
+            <div className="lg:col-span-2 space-y-4 sm:space-y-6 order-2 lg:order-1">
               {/* Token Info */}
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-                <div className="flex items-start space-x-6 mb-6">
+              <div className="bg-slate-900 rounded-xl sm:rounded-2xl border border-slate-800 p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row items-start gap-4 sm:gap-6 mb-4 sm:mb-6">
                   {raffleData.image && !raffleData.image.includes('placeholder') && !raffleData.image.includes('data:image') ? (
                     <img 
                       src={raffleData.image} 
                       alt={raffleData.name}
-                      className="w-24 h-24 rounded-full border-2 border-purple-500 object-cover flex-shrink-0"
+                      className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full border-2 border-purple-500 object-cover flex-shrink-0"
                       onError={async (e) => {
                         // Try to fetch optimized image with fallback gateways
                         if (raffleData.image && raffleData.image.includes('ipfs')) {
@@ -859,16 +861,16 @@ export default function RaffleDetailPage() {
                       }}
                     />
                   ) : (
-                    <div className="w-24 h-24 rounded-full border-2 border-purple-500 bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
-                      <span className="text-white font-bold text-xl">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full border-2 border-purple-500 bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white font-bold text-base sm:text-lg md:text-xl">
                         {raffleData.symbol ? raffleData.symbol.slice(0, 2) : 'TK'}
                       </span>
                     </div>
                   )}
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-3xl font-bold text-white mb-2 truncate">{raffleData.name}</h1>
-                    <p className="text-2xl font-semibold text-purple-400 mb-3">{raffleData.symbol}</p>
-                    <p className="text-slate-400 mb-4 line-clamp-2">{raffleData.description}</p>
+                  <div className="flex-1 min-w-0 w-full sm:w-auto">
+                    <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white mb-2 break-words">{raffleData.name}</h1>
+                    <p className="text-lg sm:text-xl md:text-2xl font-semibold text-purple-400 mb-2 sm:mb-3">{raffleData.symbol}</p>
+                    <p className="text-sm sm:text-base text-slate-400 mb-3 sm:mb-4 line-clamp-3">{raffleData.description}</p>
                     
                     {/* Contract Address Section */}
                     <div className="bg-slate-800 rounded-lg p-4 mb-4">
@@ -896,16 +898,16 @@ export default function RaffleDetailPage() {
                     </div>
                     
                     {/* Token Stats */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-slate-800 rounded-lg p-4">
-                        <div className="text-sm text-slate-400 mb-1">Total Supply</div>
-                        <div className="text-xl font-semibold text-white">
+                    <div className="grid grid-cols-2 gap-2 sm:gap-4">
+                      <div className="bg-slate-800 rounded-lg p-3 sm:p-4">
+                        <div className="text-xs sm:text-sm text-slate-400 mb-1">Total Supply</div>
+                        <div className="text-base sm:text-lg md:text-xl font-semibold text-white break-words">
                           {raffleData.totalSupply ? raffleData.totalSupply.toLocaleString() : 'N/A'}
                         </div>
                       </div>
-                      <div className="bg-slate-800 rounded-lg p-4">
-                        <div className="text-sm text-slate-400 mb-1">Decimals</div>
-                        <div className="text-xl font-semibold text-white">
+                      <div className="bg-slate-800 rounded-lg p-3 sm:p-4">
+                        <div className="text-xs sm:text-sm text-slate-400 mb-1">Decimals</div>
+                        <div className="text-base sm:text-lg md:text-xl font-semibold text-white">
                           {raffleData.decimals || 'N/A'}
                         </div>
                       </div>
@@ -1073,30 +1075,30 @@ export default function RaffleDetailPage() {
             </div>
 
             {/* Sidebar */}
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6 order-1 lg:order-2">
               {/* Timer */}
               {timeRemaining && (
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-                  <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-                    <Clock className="w-5 h-5 mr-2 text-orange-400" />
+                <div className="bg-slate-900 rounded-xl sm:rounded-2xl border border-slate-800 p-4 sm:p-6">
+                  <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center">
+                    <Clock className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-orange-400" />
                     Time Remaining
                   </h3>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-4 gap-1 sm:gap-2">
                     <div className="text-center">
-                      <div className="text-2xl font-bold text-white">{timeRemaining.days}</div>
-                      <div className="text-xs text-slate-400">Days</div>
+                      <div className="text-lg sm:text-xl md:text-2xl font-bold text-white">{timeRemaining.days}</div>
+                      <div className="text-[10px] sm:text-xs text-slate-400">Days</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-2xl font-bold text-white">{timeRemaining.hours}</div>
-                      <div className="text-xs text-slate-400">Hours</div>
+                      <div className="text-lg sm:text-xl md:text-2xl font-bold text-white">{timeRemaining.hours}</div>
+                      <div className="text-[10px] sm:text-xs text-slate-400">Hours</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-2xl font-bold text-white">{timeRemaining.minutes}</div>
-                      <div className="text-xs text-slate-400">Minutes</div>
+                      <div className="text-lg sm:text-xl md:text-2xl font-bold text-white">{timeRemaining.minutes}</div>
+                      <div className="text-[10px] sm:text-xs text-slate-400">Minutes</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-2xl font-bold text-white">{timeRemaining.seconds}</div>
-                      <div className="text-xs text-slate-400">Seconds</div>
+                      <div className="text-lg sm:text-xl md:text-2xl font-bold text-white">{timeRemaining.seconds}</div>
+                      <div className="text-[10px] sm:text-xs text-slate-400">Seconds</div>
                     </div>
                   </div>
                 </div>
@@ -1104,15 +1106,15 @@ export default function RaffleDetailPage() {
 
               {/* Buy Tickets */}
               {raffleData.status === 'active' && (
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-                  <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-                    <Ticket className="w-5 h-5 mr-2 text-green-400" />
+                <div className="bg-slate-900 rounded-xl sm:rounded-2xl border border-slate-800 p-4 sm:p-6">
+                  <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center">
+                    <Ticket className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-green-400" />
                     Buy Tickets
                   </h3>
                   
-                  <div className="space-y-4">
+                  <div className="space-y-3 sm:space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
                         Number of Tickets
                       </label>
                       <input
@@ -1121,7 +1123,7 @@ export default function RaffleDetailPage() {
                         max={raffleData.maxTickets - raffleData.soldTickets}
                         value={ticketCount}
                         onChange={(e) => setTicketCount(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 sm:px-4 py-2.5 sm:py-3 text-base text-white focus:outline-none focus:ring-2 focus:ring-purple-500 min-h-[44px]"
                       />
                     </div>
                     
@@ -1145,7 +1147,7 @@ export default function RaffleDetailPage() {
                     <button
                       onClick={handleBuyTickets}
                       disabled={isBuyingTickets || !connected}
-                      className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed text-black font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center"
+                      className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed text-black font-medium py-3 sm:py-3.5 px-4 sm:px-6 rounded-lg transition-colors flex items-center justify-center text-sm sm:text-base min-h-[48px]"
                     >
                       {isBuyingTickets ? (
                         <>

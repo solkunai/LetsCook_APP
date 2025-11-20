@@ -29,7 +29,9 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     try {
       if (publicKey && referralOptIn) {
         const code = await referralService.generateReferralCode(publicKey);
-        const baseUrl = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+        const baseUrl = typeof window !== 'undefined' && (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1'))
+          ? 'https://lets-cook-frontend.onrender.com'
+          : (typeof window !== 'undefined' ? window.location.origin : 'https://lets-cook-frontend.onrender.com');
         referralLink = `${baseUrl}?ref=${code}`;
         if (username.trim()) {
           await referralService.setUsername(publicKey, username.trim());

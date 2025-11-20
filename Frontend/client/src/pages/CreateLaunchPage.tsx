@@ -1866,14 +1866,14 @@ export default function EnhancedLaunchPage() {
         subtitle="Launch your token immediately on Solana"
         showNavigation={true}
       />
-      <div className="py-12 px-4">
+      <div className="py-4 sm:py-6 md:py-8 lg:py-12 px-3 sm:px-4 md:px-6">
       <div className="max-w-4xl mx-auto">
         {/* Token Visibility Card */}
         {showTokenVisibility && createdTokenMint && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-8"
+            className="mb-4 sm:mb-6 md:mb-8"
           >
             <TokenVisibilityCard
               tokenMint={createdTokenMint}
@@ -1888,12 +1888,12 @@ export default function EnhancedLaunchPage() {
         )}
 
         {/* Progress Bar */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-white">
+        <div className="mb-4 sm:mb-6 md:mb-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
+            <h2 className="text-base sm:text-lg md:text-xl font-semibold text-white">
               Step {currentStep + 1} of {STEPS.length}: {STEPS[currentStep].charAt(0).toUpperCase() + STEPS[currentStep].slice(1)}
             </h2>
-            <span className="text-slate-400 text-sm">
+            <span className="text-slate-400 text-xs sm:text-sm">
               {Math.round(((currentStep + 1) / STEPS.length) * 100)}% Complete
             </span>
           </div>
@@ -1913,19 +1913,19 @@ export default function EnhancedLaunchPage() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
             transition={{ duration: 0.3 }}
-            className="bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-700 p-8"
+            className="bg-slate-800/50 backdrop-blur-sm rounded-xl sm:rounded-2xl border border-slate-700 p-4 sm:p-6 md:p-8"
           >
             {/* Step 1: Basic Info */}
             {STEPS[currentStep] === 'basic' && (
-              <div className="space-y-6">
-                <div className="text-center mb-6">
-                  <h2 className="text-2xl font-bold text-white mb-2">Token Information</h2>
-                  <p className="text-slate-400">Enter your token's basic details</p>
+              <div className="space-y-4 sm:space-y-6">
+                <div className="text-center mb-4 sm:mb-6">
+                  <h2 className="text-xl sm:text-2xl font-bold text-white mb-2">Token Information</h2>
+                  <p className="text-sm sm:text-base text-slate-400">Enter your token's basic details</p>
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
                       Token Name *
                     </label>
                     <input
@@ -1933,7 +1933,7 @@ export default function EnhancedLaunchPage() {
                       value={formData.name}
                       onChange={(e) => updateFormData('name', e.target.value)}
                       placeholder="e.g., My Awesome Token"
-                      className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 ${
+                      className={`w-full bg-slate-800 border rounded-lg px-3 sm:px-4 py-2.5 sm:py-3 text-base text-white placeholder-slate-500 focus:outline-none focus:ring-2 min-h-[44px] ${
                         errors.name ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                       }`}
                     />
@@ -1941,7 +1941,7 @@ export default function EnhancedLaunchPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
                       Token Symbol *
                     </label>
                     <input
@@ -1950,7 +1950,7 @@ export default function EnhancedLaunchPage() {
                       onChange={(e) => updateFormData('symbol', e.target.value.toUpperCase())}
                       placeholder="e.g., MAT"
                       maxLength={10}
-                      className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 ${
+                      className={`w-full bg-slate-800 border rounded-lg px-3 sm:px-4 py-2.5 sm:py-3 text-base text-white placeholder-slate-500 focus:outline-none focus:ring-2 min-h-[44px] ${
                         errors.symbol ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                       }`}
                     />
@@ -2527,11 +2527,11 @@ export default function EnhancedLaunchPage() {
         </AnimatePresence>
 
         {/* Navigation Buttons */}
-        <div className="flex justify-between mt-8">
+        <div className="flex flex-col sm:flex-row justify-between gap-3 sm:gap-0 mt-6 sm:mt-8">
           <button
             onClick={handleBack}
             disabled={currentStep === 0 || isSubmitting}
-            className="flex items-center px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm sm:text-base min-h-[44px] w-full sm:w-auto"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
@@ -2541,7 +2541,7 @@ export default function EnhancedLaunchPage() {
             <button
               onClick={handleNext}
               disabled={isSubmitting}
-              className="flex items-center px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm sm:text-base font-medium min-h-[44px] w-full sm:w-auto sm:ml-auto"
             >
               Next
               <ArrowRight className="w-4 h-4 ml-2" />
@@ -2550,16 +2550,16 @@ export default function EnhancedLaunchPage() {
             <button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="flex items-center px-8 py-3 bg-gradient-to-r from-yellow-600 to-yellow-700 text-black rounded-lg hover:from-yellow-700 hover:to-yellow-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105"
+              className="flex items-center justify-center px-4 sm:px-6 md:px-8 py-2.5 sm:py-3 bg-gradient-to-r from-yellow-600 to-yellow-700 text-black rounded-lg hover:from-yellow-700 hover:to-yellow-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-sm sm:text-base font-medium min-h-[48px] w-full sm:w-auto"
                 >
                   {isSubmitting ? (
                     <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />
                       Creating Launch...
                     </>
                   ) : (
                     <>
-                  <Rocket className="w-5 h-5 mr-2" />
+                  <Rocket className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                   Launch Token
                     </>
                   )}

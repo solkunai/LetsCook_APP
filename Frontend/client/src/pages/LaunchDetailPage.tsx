@@ -812,10 +812,10 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-8">
-        <div className="grid lg:grid-cols-3 gap-4 sm:gap-5 md:gap-6">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6 md:py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 md:gap-6">
           {/* Left Column - Trading & Charts */}
-          <div className="lg:col-span-2 space-y-4 sm:space-y-5 md:space-y-6">
+          <div className="lg:col-span-2 space-y-4 sm:space-y-5 md:space-y-6 order-2 lg:order-1">
             {/* Trading Panel */}
             {launch.launchType === 'instant' ? (
               <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 border-yellow-500/20 backdrop-blur-sm">
@@ -923,7 +923,7 @@ const LaunchDetailPage: React.FC<LaunchDetailPageProps> = ({ launchId }) => {
           </div>
 
           {/* Right Column - Info & Stats */}
-          <div className="space-y-4 sm:space-y-5 md:space-y-6">
+          <div className="space-y-4 sm:space-y-5 md:space-y-6 order-1 lg:order-2">
             {/* Wallet Balance */}
             {connected && (
               <Card className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 border-yellow-500/20 backdrop-blur-sm">

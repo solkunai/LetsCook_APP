@@ -400,11 +400,11 @@ export default function TradePage() {
       {/* Content */}
       <div className="container-professional pt-24">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4 mb-6 bg-card border border-border">
-            <TabsTrigger value="trade" className="text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Trade</TabsTrigger>
-            <TabsTrigger value="liquidity" className="text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Liquidity</TabsTrigger>
-            <TabsTrigger value="rewards" className="text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Rewards</TabsTrigger>
-            <TabsTrigger value="analytics" className="text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Analytics</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 mb-6 bg-card border border-border gap-1 sm:gap-2">
+            <TabsTrigger value="trade" className="text-xs sm:text-sm text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2 sm:py-3">Trade</TabsTrigger>
+            <TabsTrigger value="liquidity" className="text-xs sm:text-sm text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2 sm:py-3">Liquidity</TabsTrigger>
+            <TabsTrigger value="rewards" className="text-xs sm:text-sm text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2 sm:py-3">Rewards</TabsTrigger>
+            <TabsTrigger value="analytics" className="text-xs sm:text-sm text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground py-2 sm:py-3">Analytics</TabsTrigger>
           </TabsList>
 
           <TabsContent value="trade" className="space-y-6">
@@ -421,10 +421,10 @@ export default function TradePage() {
                   <CardContent className="space-y-4">
                     {/* From Token */}
                     <div className="space-y-2">
-                      <Label>From</Label>
-                      <div className="flex gap-2">
+                      <Label className="text-sm sm:text-base">From</Label>
+                      <div className="flex flex-col sm:flex-row gap-2">
                         <Select value={fromToken} onValueChange={setFromToken}>
-                          <SelectTrigger className="w-32">
+                          <SelectTrigger className="w-full sm:w-32 min-h-[44px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -441,10 +441,10 @@ export default function TradePage() {
                           placeholder="0.0"
                           value={fromAmount}
                           onChange={(e) => setFromAmount(e.target.value)}
-                          className="flex-1"
+                          className="flex-1 min-h-[44px] text-base sm:text-lg"
                         />
                       </div>
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-xs sm:text-sm text-muted-foreground">
                         Balance: {(userBalances[fromToken.toLowerCase()] || userBalances[fromToken] || 0).toFixed(4)} {fromToken}
                       </div>
                     </div>
@@ -458,10 +458,10 @@ export default function TradePage() {
 
                     {/* To Token */}
                     <div className="space-y-2">
-                      <Label>To</Label>
-                      <div className="flex gap-2">
+                      <Label className="text-sm sm:text-base">To</Label>
+                      <div className="flex flex-col sm:flex-row gap-2">
                         <Select value={toToken} onValueChange={setToToken}>
-                          <SelectTrigger className="w-32">
+                          <SelectTrigger className="w-full sm:w-32 min-h-[44px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -478,10 +478,10 @@ export default function TradePage() {
                           placeholder="0.0"
                           value={toAmount}
                           readOnly
-                          className="flex-1"
+                          className="flex-1 min-h-[44px] text-base sm:text-lg"
                         />
                       </div>
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-xs sm:text-sm text-muted-foreground">
                         Balance: {(userBalances[toToken.toLowerCase()] || userBalances[toToken] || 0).toFixed(4)} {toToken}
                       </div>
                     </div>
@@ -501,7 +501,7 @@ export default function TradePage() {
 
                     {/* Swap Button */}
                     <Button 
-                      className="w-full" 
+                      className="w-full min-h-[48px] text-base sm:text-lg font-semibold" 
                       size="lg"
                       onClick={handleSwap}
                       disabled={isLoading || !fromAmount || !toAmount}

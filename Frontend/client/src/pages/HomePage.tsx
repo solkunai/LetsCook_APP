@@ -449,12 +449,12 @@ export default function HomePage() {
               </div>
 
               {/* Filters */}
-              <div className="flex gap-4 items-center">
+              <div className="flex flex-wrap gap-2 sm:gap-4 items-center w-full sm:w-auto">
                 {/* Type Filter */}
                 <select
                   value={filterType}
                   onChange={(e) => setFilterType(e.target.value as 'all' | 'instant' | 'raffle')}
-                  className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 focus:border-yellow-500"
+                  className="flex-1 sm:flex-none bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm sm:text-base focus:border-yellow-500 min-h-[44px]"
                 >
                   <option value="all">All Types</option>
                   <option value="instant">Instant</option>
@@ -465,7 +465,7 @@ export default function HomePage() {
                 <select
                   value={filterStatus}
                   onChange={(e) => setFilterStatus(e.target.value as 'all' | 'upcoming' | 'live' | 'ended')}
-                  className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 focus:border-yellow-500"
+                  className="flex-1 sm:flex-none bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm sm:text-base focus:border-yellow-500 min-h-[44px]"
                 >
                   <option value="all">All Status</option>
                   <option value="upcoming">Upcoming</option>
@@ -477,7 +477,7 @@ export default function HomePage() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest' | 'price' | 'volume' | 'hype')}
-                  className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 focus:border-yellow-500"
+                  className="flex-1 sm:flex-none bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm sm:text-base focus:border-yellow-500 min-h-[44px]"
                 >
                   <option value="newest">Newest</option>
                   <option value="oldest">Oldest</option>
@@ -492,7 +492,7 @@ export default function HomePage() {
                   disabled={loading}
                   variant="outline"
                   size="sm"
-                  className="border-gray-700 text-gray-300 hover:text-white hover:border-yellow-500"
+                  className="border-gray-700 text-gray-300 hover:text-white hover:border-yellow-500 min-h-[44px] min-w-[44px]"
                 >
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 </Button>
@@ -500,7 +500,7 @@ export default function HomePage() {
             </div>
 
             {/* Results Info */}
-            <div className="flex justify-between items-center text-sm text-gray-400">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs sm:text-sm text-gray-400">
               <span>
                 Showing {startIndex + 1}-{Math.min(endIndex, filteredLaunches.length)} of {filteredLaunches.length} launches
               </span>

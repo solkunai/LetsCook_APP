@@ -120,17 +120,17 @@ export default function HypeVotingPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent mb-4">
+      <div className="container mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8">
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent mb-2 sm:mb-4">
             Hype Voting
           </h1>
-          <p className="text-gray-600 text-lg">
+          <p className="text-gray-600 text-sm sm:text-base md:text-lg px-4">
             Vote on upcoming launches and discover the next big thing
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 sm:mb-8">
           <Card className="bg-gradient-to-r from-orange-500 to-red-500 text-white">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
@@ -180,77 +180,80 @@ export default function HypeVotingPage() {
           </Card>
         </div>
 
-        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="mb-8">
-          <TabsList className="grid w-full grid-cols-4 bg-white shadow-lg">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="mb-6 sm:mb-8">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 bg-white shadow-lg">
             <TabsTrigger 
               value="trending"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white"
+              className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white min-h-[44px]"
             >
-              <Flame className="w-4 h-4" />
-              Trending
+              <Flame className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Trending</span>
+              <span className="sm:hidden">Trend</span>
             </TabsTrigger>
             <TabsTrigger 
               value="newest"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white"
+              className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white min-h-[44px]"
             >
-              <Clock className="w-4 h-4" />
+              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               Newest
             </TabsTrigger>
             <TabsTrigger 
               value="most_voted"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white"
+              className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white min-h-[44px]"
             >
-              <Users className="w-4 h-4" />
-              Most Voted
+              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Most Voted</span>
+              <span className="sm:hidden">Voted</span>
             </TabsTrigger>
             <TabsTrigger 
               value="my_votes"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white"
+              className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-red-500 data-[state=active]:text-white min-h-[44px]"
             >
-              <Star className="w-4 h-4" />
-              My Votes
+              <Star className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">My Votes</span>
+              <span className="sm:hidden">Mine</span>
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value={selectedTab} className="mt-6">
-            <div className="space-y-6">
+          <TabsContent value={selectedTab} className="mt-4 sm:mt-6">
+            <div className="space-y-4 sm:space-y-6">
               {sortedLaunches.map((launch) => (
                 <Card key={launch.id} className="overflow-hidden hover:shadow-xl transition-all duration-300">
                   <div className="flex flex-col md:flex-row">
-                    <div className="md:w-1/3">
+                    <div className="w-full md:w-1/3">
                       <img 
                         src={launch.image} 
                         alt={launch.name}
-                        className="w-full h-48 md:h-full object-cover"
+                        className="w-full h-48 sm:h-64 md:h-full object-cover"
                       />
                     </div>
 
-                    <div className="md:w-2/3 p-6">
-                      <div className="flex items-start justify-between mb-4">
-                        <div>
-                          <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                    <div className="w-full md:w-2/3 p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-3 sm:mb-4">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2 break-words">
                             {launch.name}
                           </h3>
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge className={categoryColors[launch.category]}>
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <Badge className={`${categoryColors[launch.category]} text-xs sm:text-sm`}>
                               {launch.category}
                             </Badge>
-                            <Badge className={statusColors[launch.status]}>
+                            <Badge className={`${statusColors[launch.status]} text-xs sm:text-sm`}>
                               {launch.status}
                             </Badge>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className={`text-3xl font-bold ${getHypeColor(launch.hypeScore)}`}>
+                        <div className="text-left sm:text-right flex-shrink-0">
+                          <div className={`text-2xl sm:text-3xl font-bold ${getHypeColor(launch.hypeScore)}`}>
                             {launch.hypeScore}
                           </div>
-                          <p className="text-sm text-gray-600">Hype Score</p>
+                          <p className="text-xs sm:text-sm text-gray-600">Hype Score</p>
                         </div>
                       </div>
 
-                      <p className="text-gray-600 mb-4">{launch.description}</p>
+                      <p className="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4 line-clamp-2 sm:line-clamp-none">{launch.description}</p>
 
-                      <div className="flex flex-wrap gap-2 mb-4">
+                      <div className="flex flex-wrap gap-2 mb-3 sm:mb-4">
                         {launch.tags.map((tag) => (
                           <Badge key={tag} variant="outline" className="text-xs">
                             #{tag}
@@ -258,31 +261,31 @@ export default function HypeVotingPage() {
                         ))}
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
                         <div className="text-center">
-                          <p className="text-2xl font-bold text-gray-900">{launch.totalVotes}</p>
-                          <p className="text-sm text-gray-600">Total Votes</p>
+                          <p className="text-lg sm:text-2xl font-bold text-gray-900">{launch.totalVotes}</p>
+                          <p className="text-xs sm:text-sm text-gray-600">Total Votes</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-2xl font-bold text-green-600">{launch.upvotes}</p>
-                          <p className="text-sm text-gray-600">Upvotes</p>
+                          <p className="text-lg sm:text-2xl font-bold text-green-600">{launch.upvotes}</p>
+                          <p className="text-xs sm:text-sm text-gray-600">Upvotes</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-2xl font-bold text-red-600">{launch.downvotes}</p>
-                          <p className="text-sm text-gray-600">Downvotes</p>
+                          <p className="text-lg sm:text-2xl font-bold text-red-600">{launch.downvotes}</p>
+                          <p className="text-xs sm:text-sm text-gray-600">Downvotes</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-2xl font-bold text-blue-600">
+                          <p className="text-lg sm:text-2xl font-bold text-blue-600">
                             {launch.launchDate.toLocaleDateString()}
                           </p>
-                          <p className="text-sm text-gray-600">Launch Date</p>
+                          <p className="text-xs sm:text-sm text-gray-600">Launch Date</p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4 mb-4">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
                         <Button
                           onClick={() => handleVote(launch.id, 'up')}
-                          className={`flex items-center gap-2 ${
+                          className={`flex items-center justify-center gap-2 text-sm sm:text-base min-h-[44px] ${
                             launch.userVote === 'up' 
                               ? 'bg-green-500 hover:bg-green-600' 
                               : 'bg-gray-100 hover:bg-green-100 text-gray-700 hover:text-green-700'
@@ -294,7 +297,7 @@ export default function HypeVotingPage() {
                         </Button>
                         <Button
                           onClick={() => handleVote(launch.id, 'down')}
-                          className={`flex items-center gap-2 ${
+                          className={`flex items-center justify-center gap-2 text-sm sm:text-base min-h-[44px] ${
                             launch.userVote === 'down' 
                               ? 'bg-red-500 hover:bg-red-600' 
                               : 'bg-gray-100 hover:bg-red-100 text-gray-700 hover:text-red-700'
@@ -304,9 +307,10 @@ export default function HypeVotingPage() {
                           <ThumbsDown className="w-4 h-4" />
                           Vote Down
                         </Button>
-                        <Button variant="outline" className="flex items-center gap-2">
+                        <Button variant="outline" className="flex items-center justify-center gap-2 text-sm sm:text-base min-h-[44px]">
                           <Eye className="w-4 h-4" />
-                          View Details
+                          <span className="hidden sm:inline">View Details</span>
+                          <span className="sm:hidden">Details</span>
                         </Button>
                       </div>
                     </div>

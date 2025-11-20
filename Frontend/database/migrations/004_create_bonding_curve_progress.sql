@@ -48,3 +48,4 @@ COMMENT ON COLUMN bonding_curve_progress.current_price IS 'Current token price f
 
 
 
+

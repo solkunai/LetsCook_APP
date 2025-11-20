@@ -69,7 +69,9 @@ export default function ProfilePage() {
       const data = await referralService.getReferralData(publicKey);
       const username = localStorage.getItem('username') || data.referredFriends.find(() => false)?.username || '';
       const walletAddress = publicKey.toBase58().slice(0, 4) + '...' + publicKey.toBase58().slice(-4);
-      const baseUrl = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+      const baseUrl = typeof window !== 'undefined' && (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1'))
+        ? 'https://lets-cook-frontend.onrender.com'
+        : (typeof window !== 'undefined' ? window.location.origin : 'https://lets-cook-frontend.onrender.com');
       const referralLink = `${baseUrl}?ref=${data.referralCode}`;
       setUser({
         username,
@@ -110,10 +112,13 @@ export default function ProfilePage() {
 
     // Future: custom code persistence
     if (user) {
+      const baseUrl = typeof window !== 'undefined' && (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1'))
+        ? 'https://lets-cook-frontend.onrender.com'
+        : (typeof window !== 'undefined' ? window.location.origin : 'https://lets-cook-frontend.onrender.com');
       setUser({
         ...user,
         referralCode,
-        referralLink: `${((import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : ''))}?ref=${referralCode}`,
+        referralLink: `${baseUrl}?ref=${referralCode}`,
       });
     }
     

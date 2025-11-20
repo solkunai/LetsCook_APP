@@ -188,3 +188,276 @@
     color: hsl(var(--info-foreground));
   }
 }
+
+/* Mobile Responsive Utilities */
+@layer utilities {
+  /* Mobile-first responsive containers */
+  .container-mobile {
+    @apply w-full px-4 mx-auto;
+    max-width: 100%;
+  }
+
+  @media (min-width: 640px) {
+    .container-mobile {
+      @apply px-6;
+      max-width: 640px;
+    }
+  }
+
+  @media (min-width: 768px) {
+    .container-mobile {
+      max-width: 768px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container-mobile {
+      @apply px-8;
+      max-width: 1024px;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .container-mobile {
+      max-width: 1280px;
+    }
+  }
+
+  /* Mobile text sizes */
+  .text-mobile-xs {
+    @apply text-xs;
+  }
+
+  .text-mobile-sm {
+    @apply text-sm;
+  }
+
+  .text-mobile-base {
+    @apply text-base;
+  }
+
+  .text-mobile-lg {
+    @apply text-lg;
+  }
+
+  .text-mobile-xl {
+    @apply text-xl;
+  }
+
+  .text-mobile-2xl {
+    @apply text-2xl;
+  }
+
+  @media (min-width: 640px) {
+    .text-mobile-xs { @apply text-sm; }
+    .text-mobile-sm { @apply text-base; }
+    .text-mobile-base { @apply text-lg; }
+    .text-mobile-lg { @apply text-xl; }
+    .text-mobile-xl { @apply text-2xl; }
+    .text-mobile-2xl { @apply text-3xl; }
+  }
+
+  /* Mobile spacing */
+  .space-mobile-y-2 > * + * {
+    @apply mt-2;
+  }
+
+  .space-mobile-y-4 > * + * {
+    @apply mt-4;
+  }
+
+  .space-mobile-y-6 > * + * {
+    @apply mt-6;
+  }
+
+  @media (min-width: 640px) {
+    .space-mobile-y-2 > * + * { @apply mt-4; }
+    .space-mobile-y-4 > * + * { @apply mt-6; }
+    .space-mobile-y-6 > * + * { @apply mt-8; }
+  }
+
+  /* Mobile grid */
+  .grid-mobile {
+    @apply grid grid-cols-1 gap-4;
+  }
+
+  @media (min-width: 640px) {
+    .grid-mobile {
+      @apply grid-cols-2 gap-6;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .grid-mobile {
+      @apply grid-cols-3 gap-8;
+    }
+  }
+
+  /* Mobile flex */
+  .flex-mobile-col {
+    @apply flex flex-col;
+  }
+
+  @media (min-width: 768px) {
+    .flex-mobile-col {
+      @apply flex-row;
+    }
+  }
+
+  /* Mobile padding */
+  .p-mobile {
+    @apply p-4;
+  }
+
+  @media (min-width: 640px) {
+    .p-mobile {
+      @apply p-6;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .p-mobile {
+      @apply p-8;
+    }
+  }
+
+  /* Mobile margin */
+  .m-mobile {
+    @apply m-4;
+  }
+
+  @media (min-width: 640px) {
+    .m-mobile {
+      @apply m-6;
+    }
+  }
+
+  /* Hide on mobile */
+  .hide-mobile {
+    @apply hidden;
+  }
+
+  @media (min-width: 768px) {
+    .hide-mobile {
+      @apply block;
+    }
+  }
+
+  /* Show only on mobile */
+  .show-mobile {
+    @apply block;
+  }
+
+  @media (min-width: 768px) {
+    .show-mobile {
+      @apply hidden;
+    }
+  }
+
+  /* Mobile card */
+  .card-mobile {
+    @apply rounded-lg border border-border bg-card p-4;
+  }
+
+  @media (min-width: 640px) {
+    .card-mobile {
+      @apply p-6;
+    }
+  }
+
+  /* Mobile button */
+  .btn-mobile {
+    @apply w-full text-sm py-2 px-4;
+  }
+
+  @media (min-width: 640px) {
+    .btn-mobile {
+      @apply w-auto text-base py-2.5 px-6;
+    }
+  }
+
+  /* Mobile input */
+  .input-mobile {
+    @apply w-full text-sm py-2 px-3;
+  }
+
+  @media (min-width: 640px) {
+    .input-mobile {
+      @apply text-base py-2.5 px-4;
+    }
+  }
+
+  /* Mobile tabs - stack on mobile */
+  .tabs-mobile {
+    @apply flex flex-col;
+  }
+
+  @media (min-width: 768px) {
+    .tabs-mobile {
+      @apply flex-row;
+    }
+  }
+
+  /* Mobile table - scroll on mobile */
+  .table-mobile {
+    @apply block overflow-x-auto;
+  }
+
+  @media (min-width: 768px) {
+    .table-mobile {
+      @apply table;
+    }
+  }
+
+  /* Mobile text truncation */
+  .truncate-mobile {
+    @apply truncate;
+    max-width: 100%;
+  }
+
+  /* Mobile safe area for notched devices */
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-left {
+    padding-left: env(safe-area-inset-left);
+  }
+
+  .safe-right {
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+/* Global mobile improvements */
+@media (max-width: 767px) {
+  /* Better touch targets */
+  button, a, input, select, textarea {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Prevent text size adjustment on iOS */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  /* Better scrolling */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Remove hover effects on touch devices */
+  @media (hover: none) {
+    .hover\:scale-105:hover {
+      transform: none;
+    }
+    .hover\:shadow-lg:hover {
+      box-shadow: none;
+    }
+  }
+}

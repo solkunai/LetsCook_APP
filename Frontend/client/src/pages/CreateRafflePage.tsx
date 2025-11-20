@@ -1295,45 +1295,62 @@ export default function CreateRafflePage() {
         subtitle="Launch your token with fair distribution"
         showNavigation={true}
       />
-      <div className="py-12 px-4">
+      <div className="py-4 sm:py-6 md:py-8 lg:py-12 px-3 sm:px-4 md:px-6">
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-8"
+            className="text-center mb-6 sm:mb-8"
           >
-            <div className="flex items-center justify-center mb-4">
-            <div className="w-12 h-12 bg-yellow-500/20 rounded-full flex items-center justify-center">
-              <Ticket className="w-6 h-6 text-yellow-400" />
-              </div>
+            <div className="flex items-center justify-center mb-3 sm:mb-4">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-yellow-500/20 rounded-full flex items-center justify-center">
+              <Ticket className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400" />
             </div>
-            <h1 className="text-4xl font-bold text-white mb-2">Create Raffle Launch</h1>
-            <p className="text-slate-400">Launch your token with fair distribution through raffle tickets</p>
+            </div>
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2">Create Raffle Launch</h1>
+            <p className="text-sm sm:text-base text-slate-400">Launch your token with fair distribution through raffle tickets</p>
           </motion.div>
 
           {/* Progress Bar */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-2">
+          <div className="mb-4 sm:mb-6 md:mb-8">
+            <div className="hidden sm:flex items-center justify-between mb-2">
               {STEPS.map((step, index) => (
                 <div key={step} className="flex items-center flex-1">
                   <div className="flex flex-col items-center flex-1">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold transition-all ${
+                    <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-semibold transition-all text-xs sm:text-sm ${
                       index < currentStep ? 'bg-yellow-600 text-white' :
                       index === currentStep ? 'bg-yellow-600 text-white ring-4 ring-yellow-600/30' :
                       'bg-slate-800 text-slate-500'
                     }`}>
-                      {index < currentStep ? <CheckCircle2 className="w-5 h-5" /> : index + 1}
+                      {index < currentStep ? <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5" /> : index + 1}
                     </div>
-                    <span className="text-xs text-slate-400 mt-1 capitalize">{step}</span>
+                    <span className="text-[10px] sm:text-xs text-slate-400 mt-1 capitalize hidden md:block">{step}</span>
                   </div>
                   {index < STEPS.length - 1 && (
-                    <div className={`h-1 flex-1 mx-2 rounded ${
+                    <div className={`h-1 flex-1 mx-1 sm:mx-2 rounded ${
                       index < currentStep ? 'bg-yellow-600' : 'bg-slate-800'
                     }`} />
                   )}
                 </div>
               ))}
+            </div>
+            {/* Mobile Progress Bar */}
+            <div className="sm:hidden mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-white">
+                  Step {currentStep + 1} of {STEPS.length}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {Math.round(((currentStep + 1) / STEPS.length) * 100)}%
+                </span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-2">
+                <div 
+                  className="bg-yellow-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${((currentStep + 1) / STEPS.length) * 100}%` }}
+                />
+              </div>
             </div>
           </div>
 
@@ -1344,19 +1361,19 @@ export default function CreateRafflePage() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="bg-slate-900 rounded-2xl border border-slate-800 p-8"
+              className="bg-slate-900 rounded-xl sm:rounded-2xl border border-slate-800 p-4 sm:p-6 md:p-8"
             >
               {/* Step 0: Basic Info */}
               {STEPS[currentStep] === 'basic' && (
-                <div className="space-y-6">
-                  <div className="text-center mb-6">
-                    <h2 className="text-2xl font-bold text-white mb-2">Token Information</h2>
-                    <p className="text-slate-400">Define your token's basic properties</p>
+                <div className="space-y-4 sm:space-y-6">
+                  <div className="text-center mb-4 sm:mb-6">
+                    <h2 className="text-xl sm:text-2xl font-bold text-white mb-2">Token Information</h2>
+                    <p className="text-sm sm:text-base text-slate-400">Define your token's basic properties</p>
                   </div>
 
-                  <div className="grid md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
                         Token Name *
                       </label>
                       <input
@@ -1364,7 +1381,7 @@ export default function CreateRafflePage() {
                         value={formData.name}
                         onChange={(e) => updateFormData('name', e.target.value)}
                         placeholder="My Awesome Token"
-                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 ${
+                        className={`w-full bg-slate-800 border rounded-lg px-3 sm:px-4 py-2.5 sm:py-3 text-base text-white placeholder-slate-500 focus:outline-none focus:ring-2 min-h-[44px] ${
                           errors.name ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
                       />
@@ -1372,7 +1389,7 @@ export default function CreateRafflePage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <label className="block text-xs sm:text-sm font-medium text-slate-300 mb-2">
                         Symbol *
                       </label>
                       <input
@@ -1381,7 +1398,7 @@ export default function CreateRafflePage() {
                         onChange={(e) => updateFormData('symbol', e.target.value.toUpperCase())}
                         placeholder="MAT"
                         maxLength={10}
-                        className={`w-full bg-slate-800 border rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 ${
+                        className={`w-full bg-slate-800 border rounded-lg px-3 sm:px-4 py-2.5 sm:py-3 text-base text-white placeholder-slate-500 focus:outline-none focus:ring-2 min-h-[44px] ${
                           errors.symbol ? 'border-red-500 focus:ring-red-500' : 'border-slate-700 focus:ring-yellow-500'
                         }`}
                       />
@@ -2075,11 +2092,11 @@ export default function CreateRafflePage() {
               )}
 
               {/* Navigation */}
-              <div className="flex justify-between mt-8">
+              <div className="flex flex-col sm:flex-row justify-between gap-3 sm:gap-0 mt-6 sm:mt-8">
                 <button
                   onClick={handleBack}
                   disabled={currentStep === 0}
-                  className="flex items-center px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                  className="flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors text-sm sm:text-base min-h-[44px] w-full sm:w-auto"
                 >
                   <ArrowLeft className="w-4 h-4 mr-2" />
                   Back
@@ -2088,7 +2105,7 @@ export default function CreateRafflePage() {
                 {currentStep < STEPS.length - 1 ? (
                   <button
                     onClick={handleNext}
-                    className="flex items-center px-6 py-3 bg-yellow-600 hover:bg-yellow-700 text-black rounded-lg transition-colors"
+                    className="flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 bg-yellow-600 hover:bg-yellow-700 text-black rounded-lg transition-colors text-sm sm:text-base font-medium min-h-[44px] w-full sm:w-auto"
                   >
                     Next
                     <ArrowRight className="w-4 h-4 ml-2" />
@@ -2097,7 +2114,7 @@ export default function CreateRafflePage() {
                   <button
                     onClick={handleSubmit}
                     disabled={isSubmitting}
-                    className="flex items-center px-6 py-3 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-lg transition-colors"
+                    className="flex items-center justify-center px-4 sm:px-6 py-2.5 sm:py-3 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-lg transition-colors text-sm sm:text-base font-medium min-h-[48px] w-full sm:w-auto"
                   >
                     {isSubmitting ? (
                       <>

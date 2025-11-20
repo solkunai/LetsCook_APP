@@ -7,6 +7,32 @@ import { realLaunchService } from './realLaunchService';
 import { getSupabaseClient } from './supabase';
 import { getConnection } from './connection';
 
+// Production URL for referral links
+const PRODUCTION_URL = 'https://lets-cook-frontend.onrender.com';
+
+// Get the base URL for referral links - prefer production URL
+function getBaseUrl(): string {
+  // Check environment variable first
+  const viteEnv: any = (import.meta as any).env || {};
+  if (viteEnv.VITE_APP_URL) {
+    return viteEnv.VITE_APP_URL;
+  }
+  
+  // If in browser, check if current origin is localhost
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin;
+    // If localhost or 127.0.0.1, use production URL
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return PRODUCTION_URL;
+    }
+    // Otherwise use current origin (production)
+    return origin;
+  }
+  
+  // Default to production URL
+  return PRODUCTION_URL;
+}
+
 export interface ReferralData {
   referralCode: string;
   referredCount: number;
@@ -120,9 +146,7 @@ export class ReferralService {
 
   getReferralLink(userPublicKey: PublicKey, referralCode?: string): string {
     const code = referralCode || 'REF';
-    // Prefer configured app URL if present
-    const viteEnv: any = (import.meta as any).env || {};
-    const base = viteEnv.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    const base = getBaseUrl();
     return `${base}?ref=${code}`;
   }
 

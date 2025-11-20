@@ -227,28 +227,29 @@ export default function CollectionsPage() {
     <div className="min-h-screen bg-background pb-20">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-lg border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-heading font-bold">NFT Collections</h1>
-            <Button className="flex items-center gap-2">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-3 sm:mb-4">
+            <h1 className="text-xl sm:text-2xl font-heading font-bold">NFT Collections</h1>
+            <Button className="flex items-center gap-2 w-full sm:w-auto text-sm sm:text-base min-h-[44px]">
               <Plus className="w-4 h-4" />
-              Launch Collection
+              <span className="hidden sm:inline">Launch Collection</span>
+              <span className="sm:hidden">Launch</span>
             </Button>
           </div>
 
           {/* Search and Filters */}
-          <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 md:gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
               <Input
                 placeholder="Search collections..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-10 text-base min-h-[44px]"
               />
             </div>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-full sm:w-40">
+              <SelectTrigger className="w-full sm:w-40 min-h-[44px] text-base">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -259,7 +260,7 @@ export default function CollectionsPage() {
               </SelectContent>
             </Select>
             <Select value={filterType} onValueChange={setFilterType}>
-              <SelectTrigger className="w-full sm:w-40">
+              <SelectTrigger className="w-full sm:w-40 min-h-[44px] text-base">
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
               <SelectContent>
@@ -273,15 +274,15 @@ export default function CollectionsPage() {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="collections">Collections</TabsTrigger>
-            <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 mb-4 sm:mb-6">
+            <TabsTrigger value="collections" className="text-sm sm:text-base min-h-[44px]">Collections</TabsTrigger>
+            <TabsTrigger value="marketplace" className="text-sm sm:text-base min-h-[44px]">Marketplace</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="collections" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <TabsContent value="collections" className="space-y-4 sm:space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {filteredCollections.map((collection) => (
                 <Card key={collection.id} className="overflow-hidden hover-elevate">
                   <div className="relative">
@@ -353,19 +354,20 @@ export default function CollectionsPage() {
 
                     <div className="flex gap-2">
                       <Button 
-                        className="flex-1" 
+                        className="flex-1 text-sm sm:text-base min-h-[44px]" 
                         onClick={() => handleMintNFT(collection.id)}
                       >
                         <ShoppingCart className="w-4 h-4 mr-2" />
-                        Mint NFT
+                        <span className="hidden sm:inline">Mint NFT</span>
+                        <span className="sm:hidden">Mint</span>
                       </Button>
-                      <Button variant="outline" size="icon">
+                      <Button variant="outline" size="icon" className="min-h-[44px] min-w-[44px]">
                         <Eye className="w-4 h-4" />
                       </Button>
-                      <Button variant="outline" size="icon">
+                      <Button variant="outline" size="icon" className="min-h-[44px] min-w-[44px]">
                         <Heart className="w-4 h-4" />
                       </Button>
-                      <Button variant="outline" size="icon">
+                      <Button variant="outline" size="icon" className="min-h-[44px] min-w-[44px]">
                         <Share2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -375,8 +377,8 @@ export default function CollectionsPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="marketplace" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <TabsContent value="marketplace" className="space-y-4 sm:space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {mockListings.map((listing) => (
                 <Card key={listing.id} className="overflow-hidden hover-elevate">
                   <img
@@ -399,7 +401,7 @@ export default function CollectionsPage() {
                       ))}
                     </div>
                     <Button 
-                      className="w-full mt-3" 
+                      className="w-full mt-3 text-sm sm:text-base min-h-[44px]" 
                       onClick={() => handleBuyNFT(listing.id)}
                     >
                       <ShoppingCart className="w-4 h-4 mr-2" />

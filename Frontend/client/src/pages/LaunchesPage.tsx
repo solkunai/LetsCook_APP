@@ -285,15 +285,15 @@ const LaunchesPage: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6 hover:border-yellow-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-yellow-500/10 cursor-pointer"
+        className="bg-white/5 backdrop-blur-sm rounded-xl sm:rounded-2xl border border-white/10 p-4 sm:p-6 hover:border-yellow-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-yellow-500/10 cursor-pointer"
         onClick={() => {
           const route = launch.launchType === 'raffle' ? `/raffle/${launch.id}` : `/launch/${launch.id}`;
           window.location.href = route;
         }}
       >
         {/* Image and Basic Info */}
-        <div className="flex items-start space-x-4 mb-4">
-          <div className="w-20 h-20 rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
+        <div className="flex items-start space-x-3 sm:space-x-4 mb-3 sm:mb-4">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
             {currentImageSrc && !imageError ? (
               <img 
                 src={currentImageSrc} 
@@ -304,7 +304,7 @@ const LaunchesPage: React.FC = () => {
               />
             ) : (
               <div className="w-full h-full bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center">
-                <span className="text-white font-bold text-2xl">
+                <span className="text-white font-bold text-lg sm:text-2xl">
                   {launchSymbol.charAt(0)}
                 </span>
               </div>
@@ -312,47 +312,47 @@ const LaunchesPage: React.FC = () => {
           </div>
           
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between">
-              <h3 className="text-white font-semibold text-base truncate">{launchName}</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-white font-semibold text-sm sm:text-base truncate">{launchName}</h3>
               {launch.featured && (
-                <div className="w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0 ml-2">
-                  <Star className="w-3 h-3 text-white" />
+                <div className="w-4 h-4 sm:w-5 sm:h-5 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />
                 </div>
               )}
             </div>
-            <p className="text-gray-400 text-sm mt-1">{launchSymbol}</p>
-            <p className="text-gray-500 text-xs mt-1">CA: {launch.baseTokenMint.substring(0, 4)}...{launch.baseTokenMint.substring(launch.baseTokenMint.length - 4)}</p>
+            <p className="text-gray-400 text-xs sm:text-sm mt-0.5 sm:mt-1">{launchSymbol}</p>
+            <p className="text-gray-500 text-xs mt-0.5 sm:mt-1 truncate">CA: {launch.baseTokenMint.substring(0, 4)}...{launch.baseTokenMint.substring(launch.baseTokenMint.length - 4)}</p>
           </div>
         </div>
 
         {/* Time and Market Cap */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-2 text-gray-400 text-sm">
-            <Clock className="w-4 h-4" />
-            <span>{formatTimeAgo(launch.launchDate)}</span>
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <div className="flex items-center space-x-1.5 sm:space-x-2 text-gray-400 text-xs sm:text-sm">
+            <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="truncate">{formatTimeAgo(launch.launchDate)}</span>
           </div>
-          <div className="text-white font-semibold text-base">
+          <div className="text-white font-semibold text-sm sm:text-base">
             ${formatMarketCap(launch.marketCap)}
           </div>
         </div>
 
         {/* Progress Bar */}
-        <div className="mb-4">
-          <div className="w-full bg-gray-700 rounded-full h-2">
+        <div className="mb-3 sm:mb-4">
+          <div className="w-full bg-gray-700 rounded-full h-1.5 sm:h-2">
             <div 
-              className="bg-gradient-to-r from-yellow-400 to-yellow-600 h-2 rounded-full transition-all duration-300"
+              className="bg-gradient-to-r from-yellow-400 to-yellow-600 h-1.5 sm:h-2 rounded-full transition-all duration-300"
               style={{ width: `${Math.min(progressPercentage, 100)}%` }}
             />
           </div>
-          <div className="flex justify-between text-sm text-gray-400 mt-2">
+          <div className="flex justify-between text-xs sm:text-sm text-gray-400 mt-1.5 sm:mt-2">
             <span>{progressPercentage.toFixed(2)}%</span>
-            <span>{launch.launchType === 'raffle' ? `${launch.soldTickets || 0}${launch.maxTickets > 0 ? `/${launch.maxTickets}` : ' (unlimited)'}` : 'Progress'}</span>
+            <span className="truncate ml-2">{launch.launchType === 'raffle' ? `${launch.soldTickets || 0}${launch.maxTickets > 0 ? `/${launch.maxTickets}` : ' (unlimited)'}` : 'Progress'}</span>
           </div>
         </div>
 
         {/* Voting Section */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between">
+        <div className="mb-3 sm:mb-4">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-gray-400">Community Rating</span>
             <VotingComponent
               launchId={launch.id}
@@ -369,9 +369,9 @@ const LaunchesPage: React.FC = () => {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2 sm:space-x-3">
           <button 
-            className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-3 px-4 rounded-lg text-sm transition-colors"
+            className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2.5 sm:py-3 px-3 sm:px-4 rounded-lg text-xs sm:text-sm transition-colors min-h-[44px]"
             onClick={(e) => {
               e.stopPropagation();
               window.location.href = `/launch/${launch.id}`;
@@ -380,7 +380,7 @@ const LaunchesPage: React.FC = () => {
             Trade
           </button>
           <button 
-            className="p-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors"
+            className="p-2.5 sm:p-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
             onClick={(e) => {
               e.stopPropagation();
               // Copy contract address (SPL token mint) to clipboard
@@ -390,8 +390,9 @@ const LaunchesPage: React.FC = () => {
                 description: "Contract address copied to clipboard.",
               });
             }}
+            aria-label="Copy contract address"
           >
-            <ExternalLink className="w-4 h-4" />
+            <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
         </div>
       </motion.div>
@@ -402,29 +403,30 @@ const LaunchesPage: React.FC = () => {
     <div className="min-h-screen bg-background">
       <Header />
       
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6 md:py-8">
         {/* Header Section */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-white mb-2">Token Launches</h1>
-              <p className="text-gray-400">Discover and trade the latest token launches on Solana</p>
+        <div className="mb-4 sm:mb-6 md:mb-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-1 sm:mb-2">Token Launches</h1>
+              <p className="text-sm sm:text-base text-gray-400">Discover and trade the latest token launches on Solana</p>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4 w-full sm:w-auto">
               <button
                 onClick={fetchLaunches}
                 disabled={loading}
-                className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center justify-center space-x-2 px-3 sm:px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base min-h-[44px] flex-1 sm:flex-none"
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                <span>Refresh</span>
+                <span className="hidden sm:inline">Refresh</span>
+                <span className="sm:hidden">Refresh</span>
               </button>
             </div>
           </div>
 
           {/* Search and Filters */}
-          <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex flex-col gap-3 sm:gap-4">
             {/* Search */}
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -433,16 +435,16 @@ const LaunchesPage: React.FC = () => {
                 placeholder="Search launches..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-yellow-500/50 transition-colors"
+                className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-base text-white placeholder-gray-400 focus:outline-none focus:border-yellow-500/50 transition-colors min-h-[44px]"
               />
             </div>
 
             {/* Filters */}
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2">
               <select
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value as any)}
-                className="px-3 py-3 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                className="flex-1 sm:flex-none px-3 py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-sm sm:text-base text-white focus:outline-none focus:border-yellow-500/50 transition-colors min-h-[44px]"
               >
                 <option value="all">All Types</option>
                 <option value="instant">Instant</option>
@@ -452,7 +454,7 @@ const LaunchesPage: React.FC = () => {
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value as any)}
-                className="px-3 py-3 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                className="flex-1 sm:flex-none px-3 py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-sm sm:text-base text-white focus:outline-none focus:border-yellow-500/50 transition-colors min-h-[44px]"
               >
                 <option value="all">All Status</option>
                 <option value="upcoming">Upcoming</option>
@@ -463,7 +465,7 @@ const LaunchesPage: React.FC = () => {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="px-3 py-3 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                className="flex-1 sm:flex-none px-3 py-2.5 sm:py-3 bg-white/5 border border-white/10 rounded-lg text-sm sm:text-base text-white focus:outline-none focus:border-yellow-500/50 transition-colors min-h-[44px]"
               >
                 <option value="newest">Newest</option>
                 <option value="oldest">Oldest</option>
@@ -475,13 +477,15 @@ const LaunchesPage: React.FC = () => {
               <div className="flex items-center bg-white/5 border border-white/10 rounded-lg">
                 <button
                   onClick={() => setViewMode('grid')}
-                  className={`p-2 ${viewMode === 'grid' ? 'bg-yellow-500 text-white' : 'text-gray-400 hover:text-white'} transition-colors`}
+                  className={`p-2 sm:p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center ${viewMode === 'grid' ? 'bg-yellow-500 text-white' : 'text-gray-400 hover:text-white'} transition-colors`}
+                  aria-label="Grid view"
                 >
                   <Grid3X3 className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
-                  className={`p-2 ${viewMode === 'list' ? 'bg-yellow-500 text-white' : 'text-gray-400 hover:text-white'} transition-colors`}
+                  className={`p-2 sm:p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center ${viewMode === 'list' ? 'bg-yellow-500 text-white' : 'text-gray-400 hover:text-white'} transition-colors`}
+                  aria-label="List view"
                 >
                   <List className="w-4 h-4" />
                 </button>
@@ -491,8 +495,8 @@ const LaunchesPage: React.FC = () => {
         </div>
 
         {/* Results */}
-        <div className="mb-4">
-          <p className="text-gray-400 text-sm">
+        <div className="mb-3 sm:mb-4">
+          <p className="text-gray-400 text-xs sm:text-sm">
             Showing {filteredLaunches.length} of {launches.length} launches
           </p>
         </div>
@@ -522,12 +526,12 @@ const LaunchesPage: React.FC = () => {
 
         {/* Empty State */}
         {!loading && filteredLaunches.length === 0 && (
-          <div className="text-center py-12">
-            <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Zap className="w-8 h-8 text-gray-400" />
+          <div className="text-center py-8 sm:py-12">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
+              <Zap className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400" />
             </div>
-            <h3 className="text-xl font-semibold text-white mb-2">No launches found</h3>
-            <p className="text-gray-400 mb-6">
+            <h3 className="text-lg sm:text-xl font-semibold text-white mb-2">No launches found</h3>
+            <p className="text-sm sm:text-base text-gray-400 mb-4 sm:mb-6 px-4">
               {searchTerm || filterType !== 'all' || filterStatus !== 'all'
                 ? 'Try adjusting your search or filters'
                 : 'Be the first to create a launch!'
@@ -536,7 +540,7 @@ const LaunchesPage: React.FC = () => {
             {connected && (
               <button
                 onClick={() => window.location.href = '/create-launch'}
-                className="px-6 py-3 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-lg transition-colors"
+                className="px-4 sm:px-6 py-2.5 sm:py-3 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-lg transition-colors text-sm sm:text-base min-h-[44px]"
               >
                 Create Launch
               </button>

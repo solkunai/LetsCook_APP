@@ -54,3 +54,4 @@ CREATE INDEX IF NOT EXISTS idx_launch_metadata_real_supply ON launch_metadata(re
 CREATE INDEX IF NOT EXISTS idx_launch_metadata_virtual_supply ON launch_metadata(virtual_supply);
 
 
+

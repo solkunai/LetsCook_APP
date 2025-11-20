@@ -102,7 +102,10 @@ export default function ReferralsPage() {
 
   const copyReferralLink = async () => {
     if (!referralData) return;
-    const baseUrl = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    // Use production URL for referral links
+    const baseUrl = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
+      ? 'https://lets-cook-frontend.onrender.com'
+      : window.location.origin;
     const link = `${baseUrl}?ref=${referralData.referralCode}`;
     try {
       await navigator.clipboard.writeText(link);
@@ -120,7 +123,10 @@ export default function ReferralsPage() {
   const shareReferralLink = async () => {
     if (!referralData) return;
     
-    const shareUrl = `${window.location.origin}?ref=${referralData.referralCode}`;
+    // Use production URL for referral links
+    const shareUrl = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
+      ? `https://lets-cook-frontend.onrender.com?ref=${referralData.referralCode}`
+      : `${window.location.origin}?ref=${referralData.referralCode}`;
     
     if (navigator.share) {
       try {
@@ -224,79 +230,79 @@ export default function ReferralsPage() {
         showNavigation={true}
       />
 
-      <div className="container mx-auto px-4 py-8 pt-24">
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="friends">Friends</TabsTrigger>
-            <TabsTrigger value="rewards">Rewards</TabsTrigger>
-            <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
+      <div className="container mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 pt-20 sm:pt-24">
+        <Tabs defaultValue="overview" className="space-y-4 sm:space-y-6">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-1 sm:gap-2">
+            <TabsTrigger value="overview" className="text-xs sm:text-sm min-h-[44px]">Overview</TabsTrigger>
+            <TabsTrigger value="friends" className="text-xs sm:text-sm min-h-[44px]">Friends</TabsTrigger>
+            <TabsTrigger value="rewards" className="text-xs sm:text-sm min-h-[44px]">Rewards</TabsTrigger>
+            <TabsTrigger value="leaderboard" className="text-xs sm:text-sm min-h-[44px]">Leaderboard</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-6">
+          <TabsContent value="overview" className="space-y-4 sm:space-y-6">
             {!connected ? (
-              <Card className="p-8 text-center">
-                <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <h2 className="text-2xl font-bold mb-2">Connect Your Wallet</h2>
-                <p className="text-muted-foreground mb-6">
+              <Card className="p-4 sm:p-6 md:p-8 text-center">
+                <Users className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-3 sm:mb-4" />
+                <h2 className="text-xl sm:text-2xl font-bold mb-2">Connect Your Wallet</h2>
+                <p className="text-sm sm:text-base text-muted-foreground mb-4 sm:mb-6 px-4">
                   Connect your wallet to start earning referral rewards
                 </p>
-                <Button size="lg">
+                <Button size="lg" className="min-h-[44px] text-sm sm:text-base">
                   Connect Wallet
                 </Button>
               </Card>
             ) : isLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                <span className="ml-2">Loading referral data...</span>
+              <div className="flex items-center justify-center py-8 sm:py-12">
+                <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-primary" />
+                <span className="ml-2 text-sm sm:text-base">Loading referral data...</span>
               </div>
             ) : referralData ? (
               <>
                 {/* Stats Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
                   <Card>
-                    <CardContent className="p-6">
-                      <div className="flex items-center gap-3">
-                        <Users className="w-8 h-8 text-primary" />
-                        <div>
-                          <p className="text-sm text-muted-foreground">Referrals</p>
-                          <p className="text-2xl font-bold">{referralData.referredCount}</p>
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <Users className="w-6 h-6 sm:w-8 sm:h-8 text-primary flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-muted-foreground">Referrals</p>
+                          <p className="text-xl sm:text-2xl font-bold truncate">{referralData.referredCount}</p>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
 
                   <Card>
-                    <CardContent className="p-6">
-                      <div className="flex items-center gap-3">
-                        <Star className="w-8 h-8 text-yellow-500" />
-                        <div>
-                          <p className="text-sm text-muted-foreground">Points Earned</p>
-                          <p className="text-2xl font-bold">{referralData.pointsEarned}</p>
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <Star className="w-6 h-6 sm:w-8 sm:h-8 text-yellow-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-muted-foreground">Points Earned</p>
+                          <p className="text-xl sm:text-2xl font-bold truncate">{referralData.pointsEarned}</p>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
 
                   <Card>
-                    <CardContent className="p-6">
-                      <div className="flex items-center gap-3">
-                        <DollarSign className="w-8 h-8 text-green-500" />
-                        <div>
-                          <p className="text-sm text-muted-foreground">Total Earnings</p>
-                          <p className="text-2xl font-bold">${referralData.totalEarnings.toFixed(2)}</p>
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <DollarSign className="w-6 h-6 sm:w-8 sm:h-8 text-green-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-muted-foreground">Total Earnings</p>
+                          <p className="text-xl sm:text-2xl font-bold truncate">${referralData.totalEarnings.toFixed(2)}</p>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
 
                   <Card>
-                    <CardContent className="p-6">
-                      <div className="flex items-center gap-3">
-                        <Gift className="w-8 h-8 text-blue-500" />
-                        <div>
-                          <p className="text-sm text-muted-foreground">Pending Rewards</p>
-                          <p className="text-2xl font-bold">${totalPendingRewards.toFixed(2)}</p>
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <Gift className="w-6 h-6 sm:w-8 sm:h-8 text-blue-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-muted-foreground">Pending Rewards</p>
+                          <p className="text-xl sm:text-2xl font-bold truncate">${totalPendingRewards.toFixed(2)}</p>
                         </div>
                       </div>
                     </CardContent>
@@ -341,7 +347,7 @@ export default function ReferralsPage() {
                         <div className="flex gap-2">
                           <Input
                             id="referral-link"
-                            value={`${((import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : ''))}?ref=${referralData.referralCode}`}
+                            value={`${window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1') ? 'https://lets-cook-frontend.onrender.com' : window.location.origin}?ref=${referralData.referralCode}`}
                             readOnly
                             className="font-mono"
                           />

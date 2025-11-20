@@ -58,7 +58,10 @@ export default function ReferralSection({
 
   const handleShare = async () => {
     const shareText = `Join me on Let's Cook! Use my referral code: ${referralCode} 🍳`;
-    const shareUrl = `${window.location.origin}?ref=${referralCode}`;
+    const baseUrl = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
+      ? 'https://lets-cook-frontend.onrender.com'
+      : window.location.origin;
+    const shareUrl = `${baseUrl}?ref=${referralCode}`;
     
     if (navigator.share) {
       try {

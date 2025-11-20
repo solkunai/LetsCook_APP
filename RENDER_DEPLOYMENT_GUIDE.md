@@ -10,27 +10,28 @@ This guide will help you deploy your Let's Cook application to Render.
 
 ## Deployment Steps
 
-### Option 1: Using render.yaml (Recommended)
+### Manual Setup (Web Service - Free Tier)
 
-1. **Push your code to Git**
-   ```bash
-   git add render.yaml
-   git commit -m "Add Render deployment configuration"
-   git push
-   ```
-
-2. **Connect your repository to Render**
+1. **Create a new Web Service**
    - Go to [Render Dashboard](https://dashboard.render.com)
-   - Click "New +" → "Blueprint"
-   - Connect your Git repository
-   - Render will automatically detect the `render.yaml` file
+   - Click "New +" → "Web Service"
+   - Connect your Git repository (`solkunai/LetsCook_APP`)
+
+2. **Configure the service:**
+   - **Name:** lets-cook-frontend
+   - **Environment:** Node
+   - **Region:** Oregon (or your preferred region)
+   - **Branch:** main (or your default branch)
+   - **Root Directory:** (leave empty)
+   - **Build Command:** `cd Frontend && chmod +x build.sh && bash build.sh`
+   - **Start Command:** `cd Frontend && npm start`
 
 3. **Set Environment Variables**
    In the Render dashboard, go to your service → Environment tab and add:
    
    **Required:**
-   - `NODE_ENV=production` (already in render.yaml)
-   - `PORT=10000` (already in render.yaml)
+   - `NODE_ENV=production`
+   - `PORT=10000` (Render automatically sets PORT, but we specify for clarity)
    
    **Optional but Recommended:**
    - `SOLANA_NETWORK` - Set to `mainnet-beta` or `devnet`
@@ -41,30 +42,16 @@ This guide will help you deploy your Let's Cook application to Render.
    - `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key
 
 4. **Deploy**
-   - Render will automatically build and deploy your application
-   - The build command runs: `cd Frontend && npm install && npm run build`
-   - The start command runs: `cd Frontend && npm start`
-
-### Option 2: Manual Setup
-
-1. **Create a new Web Service**
-   - Go to Render Dashboard → "New +" → "Web Service"
-   - Connect your Git repository
-
-2. **Configure the service:**
-   - **Name:** lets-cook-frontend
-   - **Environment:** Node
-   - **Region:** Oregon (or your preferred region)
-   - **Branch:** main (or your default branch)
-   - **Root Directory:** (leave empty)
-   - **Build Command:** `cd Frontend && npm install && npm run build`
-   - **Start Command:** `cd Frontend && npm start`
-
-3. **Set Environment Variables** (same as Option 1)
-
-4. **Deploy**
    - Click "Create Web Service"
    - Render will build and deploy your application
+   - The build script ensures devDependencies (like `vite`) are installed
+
+### Option 2: Using Blueprint (Requires Render Pro)
+
+If you have Render Pro, you can use the `render.yaml` file:
+1. Go to Render Dashboard → "New +" → "Blueprint"
+2. Connect your Git repository
+3. Render will automatically detect and use the `render.yaml` file
 
 ## Environment Variables
 
@@ -83,16 +70,24 @@ This guide will help you deploy your Let's Cook application to Render.
 ## Build Process
 
 The deployment process:
-1. Installs dependencies: `npm install` in the Frontend directory
-2. Builds the application: `npm run build` (builds both client and server)
-3. Starts the server: `npm start` (runs the Express server)
+1. Runs the build script: `Frontend/build.sh` which:
+   - Unsets NODE_ENV to ensure devDependencies are installed
+   - Installs all dependencies (including devDependencies like `vite` and `esbuild`)
+   - Builds the application: `npm run build` (builds both client and server)
+2. Starts the server: `npm start` (runs the Express server from `dist/index.js`)
 
 ## Troubleshooting
 
-### Build Fails
+### Build Fails with "vite: not found"
+- **Solution:** Make sure your Build Command is: `cd Frontend && chmod +x build.sh && bash build.sh`
+- The build script ensures devDependencies are installed by unsetting NODE_ENV during `npm install`
+- If you're using a different build command, ensure it installs devDependencies
+
+### Build Fails (General)
 - Check that all dependencies are in `package.json`
 - Verify Node.js version compatibility (Render uses Node 18+ by default)
 - Check build logs in Render dashboard
+- Ensure the build script has execute permissions (handled by `chmod +x build.sh`)
 
 ### Application Won't Start
 - Verify `PORT` environment variable is set (Render sets this automatically)
